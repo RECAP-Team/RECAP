@@ -54,6 +54,9 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
         print(f"[Skip] {lang}/{direction}/{experiment}/seed_{seed}: already completed (manifest exists)")
         return
 
+    train_log_path = cfg.train_log_path(cfg.PPO_ROOT, lang, direction, experiment, seed)
+    val_log_path = cfg.val_log_path(cfg.PPO_ROOT, lang, direction, experiment, seed)
+
     train_path = cfg.split_dir(lang, direction) / "train.csv"
     calib_path = cfg.calib_path(lang, direction)
     if not (train_path.exists() and calib_path.exists()):
@@ -161,9 +164,22 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
         # ppo_trainer.step() needs matched-length lists, so we filter all
         # three together before calling it.
         keep_idx = [i for i, s in enumerate(scored) if math.isfinite(s["reward"])]
-        if not keep_idx:
+
+        # Same rank-divergent-skip hazard as recap_train_grpo.py: each rank
+        # samples a different batch and generates with sampling on, so
+        # whether THIS rank's keep_idx is empty can differ across ranks on
+        # any update. ppo_trainer.step() is a collective call (its internal
+        # Accelerator does gradient all-reduce); `continue`-ing past it on
+        # only some ranks would leave the others waiting forever (the same
+        # DDP hang class fixed in recap_train_dpo.py -- see
+        # RESOLVE_ERRORS.md). Sync the skip decision first.
+        has_data = torch.tensor(1 if keep_idx else 0, device=device)
+        if torch.distributed.is_initialized():
+            torch.distributed.all_reduce(has_data, op=torch.distributed.ReduceOp.MIN)
+        if has_data.item() == 0:
             if update % 50 == 0 and recap_utils.is_main_process():
-                tqdm.write(f"[{lang}/{direction}/{experiment}] update={update}: no valid completions this step, skipping")
+                tqdm.write(f"[{lang}/{direction}/{experiment}] update={update}: no valid completions this step "
+                           f"on at least one rank, skipping update on all ranks")
             continue
 
         kept_queries = [query_tensors[i] for i in keep_idx]
@@ -181,9 +197,37 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
                 tqdm.write(f"[{lang}/{direction}/{experiment}] update={update} mean_reward={mean_reward:.4f} "
                            f"kl={stats.get('objective/kl', float('nan')):.4f} n_invalid={n_invalid}/{len(scored)}")
 
+            # Train curve log (paper section 11.11 item 10: "PPO curves for
+            # policy loss, value loss, entropy, terminal reward, approximate
+            # KL, clip fraction, explained variance, output length ...
+            # versus update"). Keys confirmed against this pinned trl
+            # version's actual PPOTrainer.step() stats dict (record_step_stats
+            # / loss()), not guessed.
+            def _f(key):
+                v = stats.get(key)
+                return float(v) if v is not None else float("nan")
+            recap_utils.append_jsonl(train_log_path, {
+                "update": update,
+                "mean_reward": mean_reward,
+                "policy_loss": _f("ppo/loss/policy"),
+                "value_loss": _f("ppo/loss/value"),
+                "entropy": _f("ppo/policy/entropy"),
+                "approx_kl": _f("objective/kl"),
+                "clip_fraction": _f("ppo/policy/clipfrac"),
+                "explained_variance": _f("ppo/val/var_explained"),
+                "response_len_mean": _f("tokens/responses_len_mean"),
+                "n_invalid": n_invalid,
+            })
+
         if update % settings.eval_steps == 0 and update > 0 and recap_utils.is_main_process():
+            # ppo_trainer.model is DDP-wrapped under multi-GPU (a plain
+            # DistributedDataParallel doesn't expose .generate()/
+            # .save_pretrained(), only its underlying .module does) -- unwrap
+            # it first, same idiom recap_train_grpo.py already uses for its
+            # own policy model.
+            unwrapped_model = ppo_trainer.accelerator.unwrap_model(ppo_trainer.model)
             val_translations = recap_utils.generate_batch(
-                ppo_trainer.model, tokenizer, val_df["source"].tolist(), cfg.INFERENCE_CONFIG,
+                unwrapped_model, tokenizer, val_df["source"].tolist(), cfg.INFERENCE_CONFIG,
                 desc=f"{lang}/{direction}/{experiment} val@{update}",
             )
             val_scored = reward_engine.compute_raw_metrics(
@@ -194,9 +238,15 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
             if valid:
                 composite = sum((s["bleu"] + s["chrf"] + s["comet"]) / 3.0 for s in valid) / len(valid)
                 tqdm.write(f"[Eval] update={update} validation composite={composite:.4f}")
+                recap_utils.append_jsonl(val_log_path, {
+                    "update": update, "composite": composite, "n_valid": len(valid),
+                    "bleu": sum(s["bleu"] for s in valid) / len(valid),
+                    "chrf": sum(s["chrf"] for s in valid) / len(valid),
+                    "comet": sum(s["comet"] for s in valid) / len(valid),
+                })
                 if composite > best_composite:
                     best_composite = composite
-                    ppo_trainer.model.save_pretrained(checkpoint_dir)
+                    unwrapped_model.save_pretrained(checkpoint_dir)
                     tokenizer.save_pretrained(checkpoint_dir)
 
         if update % settings.save_steps == 0 and update > 0:

@@ -221,6 +221,107 @@ def figure_4_main_matrix_summary(seed: int = cfg.SEED) -> None:
     print(f"[Done] {out_path}")
 
 
+def _read_jsonl(path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    with open(path, encoding="utf-8") as f:
+        records = [json.loads(line) for line in f if line.strip()]
+    return pd.DataFrame(records)
+
+
+def _training_curve_figure(stage_root, lang: str, direction: str, experiment: str, seed: int,
+                            out_subdir: str, x_col: str, panels: list[tuple[str, list[str]]],
+                            title: str) -> None:
+    """2x2-grid curve plotter for one (lang, direction, experiment) training
+    run: exactly 3 metric panels (from train_log.jsonl) plus a 4th,
+    always-present validation panel (composite + BLEU/ChrF++/COMET, from
+    val_log.jsonl) -- every trainer has both logs, so the layout is fixed."""
+    import matplotlib.pyplot as plt
+
+    assert len(panels) == 3, "_training_curve_figure expects exactly 3 metric panels (2x2 grid, 4th = validation)"
+
+    train_df = _read_jsonl(cfg.train_log_path(stage_root, lang, direction, experiment, seed))
+    val_df = _read_jsonl(cfg.val_log_path(stage_root, lang, direction, experiment, seed))
+    if train_df.empty and val_df.empty:
+        return  # not [Skip]-printed here -- caller loops over every (lang,direction,experiment) combo, most won't exist yet
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7))
+    axes = axes.flatten()
+
+    for ax, (panel_title, cols) in zip(axes[:3], panels):
+        for col in cols:
+            if col in train_df.columns:
+                ax.plot(train_df[x_col], train_df[col], label=col, linewidth=1.2)
+        ax.set_xlabel(x_col)
+        ax.set_title(panel_title)
+        if len(cols) > 1:
+            ax.legend(fontsize=8)
+
+    val_ax = axes[3]
+    if not val_df.empty:
+        val_x = "step" if "step" in val_df.columns else "update"
+        for col in ["composite", "bleu", "chrf", "comet"]:
+            if col in val_df.columns:
+                val_ax.plot(val_df[val_x], val_df[col], marker="o", markersize=3, label=col, linewidth=1.2)
+        val_ax.set_xlabel(val_x)
+        val_ax.legend(fontsize=8)
+    val_ax.set_title("Validation")
+
+    fig.suptitle(f"{title} -- {lang}/{direction}/{experiment} (seed {seed})")
+    fig.tight_layout()
+    out_dir = PLOTS_ROOT / out_subdir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{lang.lower()}_{direction}_{experiment}.png"
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[Done] {out_path}")
+
+
+def figure_5_dpo_curves(lang: str, direction: str, experiment: str, seed: int = cfg.SEED) -> None:
+    """DPO train+val curves (paper section 11.11 item 8): loss, preference
+    accuracy (rewards/accuracies), chosen/rejected log-probs, and validation
+    BLEU/ChrF++/COMET/composite, all versus training step."""
+    _training_curve_figure(
+        cfg.DPO_ROOT, lang, direction, experiment, seed, "figure5_dpo_curves", "step",
+        panels=[
+            ("Loss", ["loss"]),
+            ("Preference accuracy / margin", ["rewards/accuracies", "rewards/margins"]),
+            ("Chosen/rejected log-probs", ["logps/chosen", "logps/rejected"]),
+        ],
+        title="DPO training curves",
+    )
+
+
+def figure_6_grpo_curves(lang: str, direction: str, experiment: str, seed: int = cfg.SEED) -> None:
+    """GRPO train+val curves (paper section 11.11 item 9): loss/policy loss,
+    KL + mean reward + advantage std, generated length + repetition +
+    invalid-output rate, and validation metrics -- all versus update."""
+    _training_curve_figure(
+        cfg.GRPO_ROOT, lang, direction, experiment, seed, "figure6_grpo_curves", "update",
+        panels=[
+            ("Loss", ["loss", "policy_loss"]),
+            ("KL / mean reward / advantage std", ["kl", "mean_reward", "advantage_std"]),
+            ("Completion length / repetition / invalid", ["mean_completion_len_words", "mean_rep", "n_invalid"]),
+        ],
+        title="GRPO training curves",
+    )
+
+
+def figure_7_ppo_curves(lang: str, direction: str, experiment: str, seed: int = cfg.SEED) -> None:
+    """PPO train+val curves (paper section 11.11 item 10): policy/value
+    loss, entropy + approx KL + clip fraction, explained variance +
+    response length, and validation metrics -- all versus update."""
+    _training_curve_figure(
+        cfg.PPO_ROOT, lang, direction, experiment, seed, "figure7_ppo_curves", "update",
+        panels=[
+            ("Policy / value loss", ["policy_loss", "value_loss"]),
+            ("Entropy / approx KL / clip fraction", ["entropy", "approx_kl", "clip_fraction"]),
+            ("Explained variance / response length", ["explained_variance", "response_len_mean"]),
+        ],
+        title="PPO training curves",
+    )
+
+
 def main() -> None:
     for experiment in PAIR_EXPERIMENTS:
         figure_1_margin_distribution(experiment)
@@ -228,6 +329,16 @@ def main() -> None:
     for experiment in NON_SFT_EXPERIMENTS:
         figure_3_delta_heatmap(experiment)
     figure_4_main_matrix_summary()
+
+    for lang in cfg.LANGUAGES:
+        for direction in cfg.DIRECTIONS:
+            for name, exp in cfg.EXPERIMENTS.items():
+                if exp.trainer == "dpo":
+                    figure_5_dpo_curves(lang, direction, name)
+                elif exp.trainer == "grpo":
+                    figure_6_grpo_curves(lang, direction, name)
+                elif exp.trainer == "ppo":
+                    figure_7_ppo_curves(lang, direction, name)
 
 
 if __name__ == "__main__":

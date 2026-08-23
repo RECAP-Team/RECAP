@@ -113,6 +113,47 @@ def build_table_8(seed: int = cfg.SEED) -> pd.DataFrame:
     return macro.sort_values("experiment")
 
 
+def _load_deltas(experiment_names: list[str], seed: int) -> pd.DataFrame:
+    """Per-direction delta-vs-SFT + paired-bootstrap 95% CI + p-value, one
+    row per (lang, direction, experiment) -- deliberately NOT macro-averaged
+    (paper section 11.10: "Show all six direction-level results before any
+    macro average" -- a bootstrap CI/p-value is only valid for the paired
+    per-direction test set it was computed on, not for an average across
+    directions with entirely different sentences)."""
+    rows = []
+    for lang in cfg.LANGUAGES:
+        for direction in cfg.DIRECTIONS:
+            for experiment in experiment_names:
+                path = cfg.deltas_path(lang, direction, experiment, seed)
+                if not path.exists():
+                    continue
+                with open(path) as f:
+                    d = json.load(f)
+                row = {"lang": lang, "direction": direction, "experiment": experiment, "n_paired": d["n_paired"]}
+                for metric in ("bleu", "chrf", "comet"):
+                    row[f"delta_{metric}"] = d[f"delta_{metric}"]
+                    row[f"delta_{metric}_ci_lo"] = d[f"delta_{metric}_ci"][0]
+                    row[f"delta_{metric}_ci_hi"] = d[f"delta_{metric}_ci"][1]
+                    row[f"delta_{metric}_pvalue"] = d[f"delta_{metric}_pvalue"]
+                rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def build_table_7_significance(seed: int = cfg.SEED) -> pd.DataFrame:
+    """Per-direction significance companion to Table 7 -- delta vs SFT, 95%
+    paired-bootstrap CI, and two-sided p-value for each main-matrix
+    experiment, one row per direction (never macro-averaged -- see
+    _load_deltas())."""
+    experiments = [e for e in cfg.MAIN_MATRIX_ORDER if e != "sft"]
+    return _load_deltas(experiments, seed)
+
+
+def build_table_8_significance(seed: int = cfg.SEED) -> pd.DataFrame:
+    """Per-direction significance companion to Table 8 (preference-ablation
+    ladder) -- same fields as build_table_7_significance()."""
+    return _load_deltas(cfg.PREFERENCE_ABLATION_ORDER, seed)
+
+
 def build_table_9(seed: int = cfg.SEED) -> pd.DataFrame:
     """Candidate-diversity / pair-strategy comparison. Requires the optional
     model-diversity ablation (self-sampling vs heterogeneous candidates,
@@ -138,7 +179,13 @@ def main() -> None:
     build_table_6().to_csv(out_dir / "table6.csv", index=False)
     print("[Done] table6.csv")
 
-    for name, builder in [("table7", build_table_7), ("table8", build_table_8), ("table9", build_table_9)]:
+    for name, builder in [
+        ("table7", build_table_7),
+        ("table7_significance", build_table_7_significance),
+        ("table8", build_table_8),
+        ("table8_significance", build_table_8_significance),
+        ("table9", build_table_9),
+    ]:
         df = builder()
         df.to_csv(out_dir / f"{name}.csv", index=False)
         print(f"[Done] {name}.csv ({len(df)} rows)")

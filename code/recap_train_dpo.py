@@ -45,7 +45,8 @@ class ValidationCheckpointCallback:
     checkpoint saved is genuinely the best-on-validation one, per the paper's
     explicit "select by validation, not training loss or last step" rule."""
 
-    def __init__(self, val_sources, val_refs, reward_engine: RewardEngine, out_dir, tokenizer, eval_steps: int, label: str = "DPO"):
+    def __init__(self, val_sources, val_refs, reward_engine: RewardEngine, out_dir, tokenizer, eval_steps: int,
+                 label: str = "DPO", val_log_path=None):
         self.val_sources = val_sources
         self.val_refs = val_refs
         self.reward_engine = reward_engine
@@ -53,6 +54,7 @@ class ValidationCheckpointCallback:
         self.tokenizer = tokenizer
         self.eval_steps = eval_steps
         self.label = label
+        self.val_log_path = val_log_path
         self.best_composite = float("-inf")
         self.best_step = None
         self.last_result: dict = {}
@@ -75,6 +77,8 @@ class ValidationCheckpointCallback:
         self.last_result = result
         if recap_utils.is_main_process():
             print(f"[Eval] step={step} validation composite={result['composite']:.4f} (n_valid={result.get('n_valid', 0)})")
+            if self.val_log_path is not None:
+                recap_utils.append_jsonl(self.val_log_path, result)
         if result["composite"] > self.best_composite:
             self.best_composite = result["composite"]
             self.best_step = step
@@ -84,10 +88,17 @@ class ValidationCheckpointCallback:
         return result
 
 
-def _make_trl_callback(val_callback: ValidationCheckpointCallback):
+def _make_trl_callback(val_callback: ValidationCheckpointCallback, train_log_path=None):
     """Thin transformers.TrainerCallback adapter -- on_step_end fires inside
     TRL's blocking trainer.train() loop, which is what actually makes
-    periodic validation happen during training."""
+    periodic validation happen during training. on_log fires every
+    logging_steps and is what feeds the train curve log (paper section
+    11.11 item 8: "DPO curves for loss, preference accuracy, chosen/
+    rejected log probabilities, implicit KL ... versus update") -- TRL's
+    DPOTrainer already computes loss/rewards-accuracies/rewards-margins/
+    logps-chosen/logps-rejected into the same `logs` dict every logging
+    step, so this just persists what's already being computed rather than
+    deriving anything new."""
     from transformers import TrainerCallback
 
     class _Adapter(TrainerCallback):
@@ -96,6 +107,11 @@ def _make_trl_callback(val_callback: ValidationCheckpointCallback):
                 if recap_utils.is_main_process():
                     val_callback.evaluate(model, state.global_step)
                 recap_utils.wait_for_everyone()
+            return control
+
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            if logs is not None and train_log_path is not None:
+                recap_utils.append_jsonl(train_log_path, {"step": state.global_step, **logs})
             return control
 
     return _Adapter()
@@ -112,6 +128,28 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
     from trl import DPOConfig, DPOTrainer
 
+    # trl==0.11.4's DPOTrainer.get_batch_logps() only clones `labels` before
+    # mutating it in place (`labels[labels == label_pad_token_id] = 0`) on
+    # the decoder-only branch (`if not is_encoder_decoder: labels =
+    # labels[:, 1:].clone()`) -- for encoder-decoder models like mT5 that
+    # clone is skipped, so it mutates the exact same tensor object that
+    # concatenated_forward() already passed into the model as `labels=`
+    # (which the model uses internally for its own cross-entropy loss and
+    # saves for backward). The later in-place mutation bumps that tensor's
+    # autograd version after it was already saved, raising "one of the
+    # variables needed for gradient computation has been modified by an
+    # inplace operation" on the very first training step. Patch in the
+    # missing clone rather than editing the installed trl package, so this
+    # survives env rebuilds via requirements.txt.
+    _orig_get_batch_logps = DPOTrainer.get_batch_logps
+
+    def _patched_get_batch_logps(logits, labels, label_pad_token_id=-100, is_encoder_decoder=False):
+        if is_encoder_decoder:
+            labels = labels.clone()
+        return _orig_get_batch_logps(logits, labels, label_pad_token_id, is_encoder_decoder)
+
+    DPOTrainer.get_batch_logps = staticmethod(_patched_get_batch_logps)
+
     exp = cfg.EXPERIMENTS[experiment]
     if exp.trainer != "dpo":
         raise ValueError(f"{experiment} is not a DPO experiment (trainer={exp.trainer})")
@@ -125,6 +163,9 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
     if manifest_path.exists():
         print(f"[Skip] {lang}/{direction}/{experiment}/seed_{seed}: already completed (manifest exists)")
         return
+
+    train_log_path = cfg.train_log_path(cfg.DPO_ROOT, lang, direction, experiment, seed)
+    val_log_path = cfg.val_log_path(cfg.DPO_ROOT, lang, direction, experiment, seed)
 
     pairs_path = cfg.pairs_experiment_dir(lang, direction, experiment) / "pairs_balanced.csv"
     if not pairs_path.exists():
@@ -165,6 +206,14 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
         warmup_ratio=settings.warmup_ratio,
         max_grad_norm=settings.max_grad_norm,
         save_steps=settings.save_steps,
+        # Without this, HF's Trainer keeps every checkpoint-<step> forever --
+        # each one is a full model+optimizer snapshot. save_total_limit=1
+        # keeps only the single most recent one under trainer_state/ (still
+        # enough for the resume logic below, which always wants the latest),
+        # while the actual deployed model lives separately in checkpoint_dir
+        # (the best-by-validation model, updated by ValidationCheckpointCallback).
+        # So on disk this is exactly "best checkpoint + last checkpoint."
+        save_total_limit=1,
         logging_steps=50,
         seed=seed,
         report_to=[],
@@ -181,7 +230,7 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
     val_callback = ValidationCheckpointCallback(
         val_df["source"].tolist(), val_df["gold_truth"].tolist(),
         calib_engine, checkpoint_dir, tokenizer, eval_steps=settings.eval_steps,
-        label=f"{lang}/{direction}/{experiment}",
+        label=f"{lang}/{direction}/{experiment}", val_log_path=val_log_path,
     )
 
     # Resume support, part 1: if an earlier run of this exact job got killed
@@ -228,7 +277,7 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
         train_dataset=train_dataset,
         **{_tokenizer_kwarg: tokenizer},
     )
-    trainer.add_callback(_make_trl_callback(val_callback))
+    trainer.add_callback(_make_trl_callback(val_callback, train_log_path=train_log_path))
 
     trainer.train(resume_from_checkpoint=resume_from)
 
@@ -238,10 +287,9 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
     # declare done. Gated exactly like the on_step_end callback: only rank 0
     # runs generate()/COMET, everyone else just waits at the barrier --
     # otherwise every DDP rank would redundantly re-run validation here.
-    if val_callback.best_step is None:
-        if recap_utils.is_main_process():
-            val_callback.evaluate(trainer.model, trainer.state.global_step)
-        recap_utils.wait_for_everyone()
+    if recap_utils.is_main_process() and val_callback.best_step is None:
+        val_callback.evaluate(trainer.model, trainer.state.global_step)
+    recap_utils.wait_for_everyone()
     final_metrics = val_callback.last_result
     print(f"[Eval] {lang}/{direction}/{experiment}: best validation composite="
           f"{val_callback.best_composite:.4f} (step={val_callback.best_step})")

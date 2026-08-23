@@ -17,7 +17,7 @@ from pathlib import Path
 # 1. Data / plug-and-play lists
 # ---------------------------------------------------------------------------
 
-LANGUAGES = ["Bhili", "Gondi", "Mundari"]
+LANGUAGES = ["Bhili", "Mundari"]  # Gondi excluded from the paper's scope
 DIRECTIONS = ["hi2tgt", "tgt2hi"]
 MODEL_NAMES = ["nllb", "mt5", "qwen", "llama"]
 
@@ -27,7 +27,7 @@ MODEL_NAMES = ["nllb", "mt5", "qwen", "llama"]
 
 ROOT = Path(__file__).resolve().parent.parent
 
-MAHA_DATA_2_ROOT = ROOT / "maha_data_2"
+MAHA_DATA_2_ROOT = ROOT / "dataset" / "maha_data_2"
 SPLITS_ROOT = ROOT / "recap_splits"
 CALIB_ROOT = ROOT / "recap_calib"
 REWARDS_ROOT = ROOT / "recap_rewards"
@@ -75,8 +75,29 @@ def run_manifest_path(stage_root: Path, lang: str, direction: str, experiment: s
     return stage_root / lang.lower() / direction / experiment / f"seed_{seed}" / "run_manifest.json"
 
 
+def train_log_path(stage_root: Path, lang: str, direction: str, experiment: str, seed: int) -> Path:
+    """Per-step training-curve log (JSONL, one record per logging/update
+    step) -- written by all three trainers via recap_utils.append_jsonl(),
+    read by recap_report_plots.py's training-curve figures."""
+    return stage_root / lang.lower() / direction / experiment / f"seed_{seed}" / "train_log.jsonl"
+
+
+def val_log_path(stage_root: Path, lang: str, direction: str, experiment: str, seed: int) -> Path:
+    """Per-validation-event curve log (JSONL) -- same idea as
+    train_log_path() but for the periodic validation passes."""
+    return stage_root / lang.lower() / direction / experiment / f"seed_{seed}" / "val_log.jsonl"
+
+
 def eval_report_path(lang: str, direction: str, experiment: str, seed: int) -> Path:
     return EVAL_ROOT / lang.lower() / direction / experiment / f"seed_{seed}" / "report.json"
+
+
+def deltas_path(lang: str, direction: str, experiment: str, seed: int) -> Path:
+    """Delta-vs-SFT + paired-bootstrap CI/p-value for one experiment,
+    written by recap_evaluate.py::compute_deltas() -- separate from
+    report.json (that file is one experiment's own absolute numbers; this
+    one is always a comparison against the SFT baseline)."""
+    return EVAL_ROOT / lang.lower() / direction / experiment / f"seed_{seed}" / "deltas_vs_sft.json"
 
 
 def sft_checkpoint_path(lang: str, direction: str) -> Path:
@@ -99,7 +120,16 @@ def best_checkpoint_path(lang: str, direction: str) -> Path:
 # 3. Split settings (Stage 1)
 # ---------------------------------------------------------------------------
 
-SPLIT_RATIOS = {"train": 0.80, "val": 0.10, "test": 0.10}
+SPLIT_RATIOS = {"train": 0.9925, "val": 0.0025, "test": 0.005}
+# At Bhili/Mundari's real scale (~220K/210K rows), a flat 80/10/10 split
+# gives ~22K val AND test rows -- val gets decoded+scored on EVERY
+# validation event during training (dozens of times per job), and the
+# paired-bootstrap significance test at eval time recomputes real corpus
+# BLEU/ChrF++ 1000x per metric per experiment, so its cost scales with test
+# set size too. Sized instead to land close to FLORES-200's devtest
+# convention (~1,000-1,100 sentences per direction) for reporting rigor,
+# while keeping val small since it only needs to be good enough for
+# checkpoint selection, not final numbers.
 SPLIT_SEED = 13
 
 # ---------------------------------------------------------------------------
@@ -216,10 +246,10 @@ MAX_PAIRS_PER_SOURCE = 6     # natural cap: C(4,2) = 6 unordered pairs per sourc
 class DPOSettings:
     beta: float = 0.1
     learning_rate: float = 5e-6
-    per_device_train_batch_size: int = 8
-    gradient_accumulation_steps: int = 4
+    per_device_train_batch_size: int = 16
+    gradient_accumulation_steps: int = 2
     num_train_epochs: int = 3
-    max_length: int = 256
+    max_length: int = 320  # was 256 -- Mundari's combined prompt+completion tail sits close to 256 (real tokenizer check)
     max_prompt_length: int = 128
     warmup_ratio: float = 0.1
     max_grad_norm: float = 1.0
@@ -247,15 +277,15 @@ DPO_SETTINGS_SMOKE_TEST = DPOSettings(
 
 @dataclass(frozen=True)
 class GRPOSettings:
-    group_size: int = 2               # G in {2, 3}
+    group_size: int = 3               # G in {2, 3}
     learning_rate: float = 1e-6
     kl_coef: float = 0.05
     clip_epsilon: float = 0.2
-    temperature: float = 1.0
-    top_p: float = 0.95
-    max_new_tokens: int = 128
+    temperature: float = 1.3
+    top_p: float = 0.85
+    max_new_tokens: int = 176  # was 128 -- stored candidates cap at exactly 128 (a generation artifact, not a true length); Mundari references already exceed 128 for ~1% of rows
     num_updates: int = 2000
-    per_device_batch_size: int = 4     # sources per step (each yields group_size completions)
+    per_device_batch_size: int = 8     # sources per step (each yields group_size completions)
     eval_steps: int = 200
     save_steps: int = 200
     source_subset_size: int = 50_000   # fixed subset per direction (paper Section 8.6)
@@ -300,9 +330,9 @@ class PPOSettings:
     gamma: float = 1.0
     lam: float = 0.95
     batch_size: int = 32
-    mini_batch_size: int = 4
+    mini_batch_size: int = 8
     ppo_epochs: int = 4
-    max_new_tokens: int = 128
+    max_new_tokens: int = 176  # was 128 -- stored candidates cap at exactly 128 (a generation artifact, not a true length); Mundari references already exceed 128 for ~1% of rows
     num_updates: int = 2000
     eval_steps: int = 200
     save_steps: int = 200
@@ -379,7 +409,7 @@ DDP_ENV = {"NCCL_ASYNC_ERROR_HANDLING": "1"}
 class InferenceConfig:
     strategy: str = "greedy"   # "greedy" | "beam"
     num_beams: int = 1
-    max_new_tokens: int = 128
+    max_new_tokens: int = 176  # was 128 -- stored candidates cap at exactly 128 (a generation artifact, not a true length); Mundari references already exceed 128 for ~1% of rows
 
 
 INFERENCE_CONFIG = InferenceConfig()

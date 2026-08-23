@@ -33,8 +33,15 @@ def resolve_checkpoint(lang: str, direction: str, checkpoint: str | None = None,
         exp = cfg.EXPERIMENTS[experiment]
         stage_root = {"dpo": cfg.DPO_ROOT, "grpo": cfg.GRPO_ROOT, "ppo": cfg.PPO_ROOT}.get(exp.trainer)
         if stage_root is None:  # sft
-            return str(cfg.sft_checkpoint_path(lang, direction))
-        return str(cfg.checkpoint_dir(stage_root, lang, direction, experiment, cfg.SEED))
+            path = cfg.sft_checkpoint_path(lang, direction)
+        else:
+            path = cfg.checkpoint_dir(stage_root, lang, direction, experiment, cfg.SEED)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"No checkpoint found for {lang}/{direction}/{experiment} at {path}. "
+                f"Train it first (recap_train_{exp.trainer}.py), or pass --checkpoint explicitly."
+            )
+        return str(path)
 
     best_path = cfg.best_checkpoint_path(lang, direction)
     if not best_path.exists():

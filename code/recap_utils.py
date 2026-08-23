@@ -174,6 +174,20 @@ def generate_batch(
     return outputs
 
 
+def append_jsonl(path: Path, record: dict[str, Any]) -> None:
+    """Appends one JSON record as a line -- used for the per-step training
+    and per-validation-event curve logs (recap_train_dpo.py/
+    recap_train_grpo.py/recap_train_ppo.py write these, recap_report_plots.py
+    reads them back). Gated to rank 0 so DDP doesn't duplicate-write the same
+    entries; append-only so a resumed run's log just continues rather than
+    needing separate resume handling."""
+    if not is_main_process():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, default=str) + "\n")
+
+
 def save_training_state_meta(path: Path, step: int, extra: dict | None = None) -> None:
     """Small resume-metadata JSON (loop step counter, best-so-far composite)
     for hand-rolled training loops (GRPO, classic-API PPO) that don't get HF

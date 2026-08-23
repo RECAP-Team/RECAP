@@ -109,8 +109,8 @@ class RewardEngine:
         reference should be. An absolute ceiling is kept too, as a backstop
         against a runaway generation loop when the reference itself is only
         a word or two."""
-        if candidate is None:
-            return False
+        if candidate is None or (isinstance(candidate, float) and math.isnan(candidate)):
+            return False  # pandas reads an empty CSV cell as float('nan'), not None
         text = str(candidate).strip()
         if not text:
             return False

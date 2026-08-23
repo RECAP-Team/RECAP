@@ -303,7 +303,7 @@ GPUs as `NGPUS_PER_JOB`:
 ```bash
 qsub -I -P misn.mota2.spons -N recap_dpo_bhili_hi2tgt -lselect=1:ncpus=1:ngpus=2 -lwalltime=08:00:00
 # once the session opens:
-cd /path/to/RECAP/code
+cd /flash/scai/msr/aiy237528/final-climb-adivaani/RECAP/code
 export NGPUS_PER_JOB=2
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment recap_dpo
 ```
@@ -320,7 +320,7 @@ instead of `-I` — note `ngpus` in the resource request must match
 #PBS -l select=1:ncpus=1:ngpus=2
 #PBS -l walltime=08:00:00
 
-cd /path/to/RECAP/code
+cd /flash/scai/msr/aiy237528/final-climb-adivaani/RECAP/code
 export NGPUS_PER_JOB=2
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment recap_dpo
 ```
@@ -335,7 +335,7 @@ For a plain single-GPU job (no `torchrun` needed at all), just request
 #PBS -l select=1:ncpus=1:ngpus=1
 #PBS -l walltime=08:00:00
 
-cd /path/to/RECAP/code
+cd /flash/scai/msr/aiy237528/final-climb-adivaani/RECAP/code
 python recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment recap_dpo
 ```
 
@@ -368,6 +368,34 @@ finish before evaluating any of them. **No `torchrun`** — `recap_evaluate.py`
 no data-parallel sharding built in; running it under `torchrun` would just
 have every rank redundantly evaluate the same full set, not divide the work.
 
+**Statistical significance testing runs automatically as part of this
+step** — for every experiment except `sft` itself, `compute_deltas()` now
+also runs a paired-bootstrap significance test (Koehn, 2004) against the SFT
+baseline: 1000 resamples of the paired test-sentence indices, recomputing
+the real corpus-level BLEU/ChrF++ (not mean-of-sentence-scores) and mean
+COMET on each resample, giving a 95% CI and a two-sided p-value for each of
+the three metrics. Results are written to
+`recap_eval/<lang>/<direction>/<experiment>/seed_<N>/deltas_vs_sft.json` and
+cached the same way `report.json` is — rerunning `recap_evaluate.py` is a
+no-op for anything already scored.
+
+**One-time migration note**: this added `hyp`/`ref` (the actual translation
+and reference text, not just their scores) to `report.json`'s
+`per_sentence` section, because a real corpus-level bootstrap needs to
+recompute BLEU/ChrF++ on each resample, not just resample pre-computed
+sentence scores (the earlier version of `compute_deltas()` did the latter,
+which is a subtly different and less rigorous statistic than the corpus-BLEU
+delta it was actually reporting — this is now fixed). Any `report.json`
+written before this change won't have those fields yet. If you evaluated
+anything before pulling this update, delete the stale reports and rerun:
+
+```bash
+rm -rf ../recap_eval/*/*/*/seed_13/report.json ../recap_eval/*/*/*/seed_13/deltas_vs_sft.json
+python recap_evaluate.py
+```
+
+(`best_checkpoint.json` doesn't depend on this and doesn't need deleting.)
+
 ---
 
 ## 9. Group G — reporting (after Group F)
@@ -376,6 +404,22 @@ have every rank redundantly evaluate the same full set, not divide the work.
 python recap_report_tables.py
 python recap_report_plots.py   # needs matplotlib: pip install matplotlib
 ```
+
+`recap_report_tables.py` now also writes `table7_significance.csv` and
+`table8_significance.csv` alongside `table7.csv`/`table8.csv` — delta vs
+SFT, 95% CI, and p-value for BLEU/ChrF++/COMET, **one row per direction**
+(never macro-averaged: a bootstrap CI/p-value is only valid for the paired
+test set it was computed on, and the directions don't share test
+sentences). `table7.csv`/`table8.csv` stay as the macro-averaged absolute
+numbers; use the `_significance` tables for the paper's per-direction
+significance reporting (paper section 11.10 explicitly asks to "show all
+[direction]-level results before any macro average"), and cite the macro
+tables only for the summary view.
+
+For the paper table itself, the common format is `delta [95% CI]` with a
+significance marker from the p-value, e.g. `+0.021 [+0.008, +0.034]**`
+using `*` p<0.05, `**` p<0.01 (or just report `p=0.006` directly — either
+is standard, pick one and use it consistently across all tables).
 
 ---
 

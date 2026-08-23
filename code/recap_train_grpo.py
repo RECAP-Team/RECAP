@@ -82,6 +82,9 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
         print(f"[Skip] {lang}/{direction}/{experiment}/seed_{seed}: already completed (manifest exists)")
         return
 
+    train_log_path = cfg.train_log_path(cfg.GRPO_ROOT, lang, direction, experiment, seed)
+    val_log_path = cfg.val_log_path(cfg.GRPO_ROOT, lang, direction, experiment, seed)
+
     train_path = cfg.split_dir(lang, direction) / "train.csv"
     calib_path = cfg.calib_path(lang, direction)
     if not (train_path.exists() and calib_path.exists()):
@@ -215,10 +218,25 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
                 advantages[i] = (scored[i]["reward"] - mean_r) / std_r
 
         keep_idx = [i for i in range(len(scored)) if valid_mask[i] and advantages[i] != 0.0]
-        if not keep_idx:
+
+        # Each rank samples a DIFFERENT batch (rank-aware seeding above) and
+        # generates with sampling on, so whether THIS rank's keep_idx is
+        # empty is a per-rank-random outcome -- it can differ across ranks
+        # on any given update. `continue`-ing here only on the ranks that
+        # happened to get no valid data would skip their accelerator.backward()
+        # call this iteration while other ranks still make it: backward()
+        # triggers an all-reduce that every rank must join, so a rank that
+        # skipped it would leave the others waiting forever (this is the same
+        # class of DDP hang fixed in recap_train_dpo.py -- see
+        # RESOLVE_ERRORS.md). Sync the skip decision across all ranks first,
+        # so either everyone proceeds together or everyone skips together.
+        has_data = torch.tensor(1 if keep_idx else 0, device=accelerator.device)
+        if torch.distributed.is_initialized():
+            torch.distributed.all_reduce(has_data, op=torch.distributed.ReduceOp.MIN)
+        if has_data.item() == 0:
             if update % 50 == 0 and recap_utils.is_main_process():
                 tqdm.write(f"[{lang}/{direction}/{experiment}] update={update}: no valid non-zero-advantage "
-                           f"completions this step, skipping update")
+                           f"completions this step on at least one rank, skipping update on all ranks")
             continue
 
         kept_sources = [all_sources[i] for i in keep_idx]
@@ -260,6 +278,23 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
                            f"policy_loss={policy_loss.item():.4f} kl={kl.item():.4f} "
                            f"mean_reward={mean_reward:.4f} n_invalid={n_invalid}/{len(scored)}")
 
+            # Train curve log (paper section 11.11 item 9: "GRPO curves for
+            # mean reward, component rewards, advantage standard deviation,
+            # KL, generated length, repetition, invalid-output rate ...
+            # versus update").
+            valid_rep = [scored[i]["rep"] for i in range(len(scored)) if valid_mask[i] and math.isfinite(scored[i]["rep"])]
+            recap_utils.append_jsonl(train_log_path, {
+                "update": update,
+                "loss": float(loss.item()),
+                "policy_loss": float(policy_loss.item()),
+                "kl": float(kl.item()),
+                "mean_reward": float(mean_reward),
+                "advantage_std": float(advantages_t.std().item()) if len(kept_advantages) > 1 else 0.0,
+                "mean_completion_len_words": sum(len(c.split()) for c in all_completions) / len(all_completions),
+                "mean_rep": sum(valid_rep) / len(valid_rep) if valid_rep else float("nan"),
+                "n_invalid": n_invalid,
+            })
+
         if update % settings.eval_steps == 0 and update > 0:
             recap_utils.wait_for_everyone()
             if recap_utils.is_main_process():
@@ -276,6 +311,12 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
                 if valid:
                     composite = sum((s["bleu"] + s["chrf"] + s["comet"]) / 3.0 for s in valid) / len(valid)
                     tqdm.write(f"[Eval] update={update} validation composite={composite:.4f}")
+                    recap_utils.append_jsonl(val_log_path, {
+                        "update": update, "composite": composite, "n_valid": len(valid),
+                        "bleu": sum(s["bleu"] for s in valid) / len(valid),
+                        "chrf": sum(s["chrf"] for s in valid) / len(valid),
+                        "comet": sum(s["comet"] for s in valid) / len(valid),
+                    })
                     if composite > best_composite:
                         best_composite = composite
                         unwrapped.save_pretrained(checkpoint_dir)

@@ -37,19 +37,58 @@ def _rho_len(candidate: str, reference: str) -> float:
     return len(str(candidate)) / max(len(str(reference)), 1)
 
 
-def _paired_bootstrap_ci(deltas: list[float], n_resamples: int = N_BOOTSTRAP, seed: int = 13) -> tuple[float, float]:
-    if not deltas:
-        return (float("nan"), float("nan"))
+def _corpus_score_for_idx(metric: str, hyps: list[str], refs: list[str], scores: list[float], idx: list[int]) -> float:
+    """Corpus-level score restricted to one (possibly-repeated, via bootstrap
+    resampling) index list. BLEU/ChrF++ use sacrebleu's real corpus
+    aggregation -- never mean-of-sentence-scores, same convention as
+    evaluate_one()'s own corpus_bleu/corpus_chrf calls. COMET's "corpus"
+    score is its own segment-mean by convention, so plain averaging is
+    correct there."""
+    if metric == "comet":
+        return sum(scores[i] for i in idx) / len(idx)
+    import sacrebleu
+
+    sub_hyps = [hyps[i] for i in idx]
+    sub_refs = [refs[i] for i in idx]
+    if metric == "bleu":
+        return sacrebleu.corpus_bleu(sub_hyps, [sub_refs]).score / 100.0
+    return sacrebleu.corpus_chrf(sub_hyps, [sub_refs]).score / 100.0
+
+
+def _paired_bootstrap_test(
+    metric: str, sft_hyps: list[str], cond_hyps: list[str], refs: list[str],
+    sft_scores: list[float], cond_scores: list[float], point_delta: float,
+    n_resamples: int = N_BOOTSTRAP, seed: int = 13,
+) -> dict:
+    """Koehn (2004)-style paired bootstrap significance test. Resamples
+    SENTENCE INDICES (not sentence-level score deltas) with replacement and
+    recomputes the real corpus-level metric on each resample for both
+    systems using the SAME resampled indices -- this is what keeps the test
+    valid for BLEU/ChrF++'s non-linear corpus aggregation. Bootstrapping the
+    mean of per-sentence BLEU deltas instead (an easy mistake) would not
+    actually be a confidence interval for the corpus-BLEU delta being
+    reported. Returns the 95% CI and a two-sided p-value from the SAME
+    resample draws, so both numbers describe the same underlying test."""
+    n = len(refs)
+    if n == 0:
+        return {"ci": [float("nan"), float("nan")], "p_value": float("nan")}
     rng = random.Random(seed)
-    n = len(deltas)
-    means = []
+    resampled_deltas = []
     for _ in range(n_resamples):
-        sample = [deltas[rng.randrange(n)] for _ in range(n)]
-        means.append(sum(sample) / n)
-    means.sort()
-    lo = means[int(0.025 * n_resamples)]
-    hi = means[int(0.975 * n_resamples) - 1]
-    return (lo, hi)
+        idx = [rng.randrange(n) for _ in range(n)]
+        sft_score = _corpus_score_for_idx(metric, sft_hyps, refs, sft_scores, idx)
+        cond_score = _corpus_score_for_idx(metric, cond_hyps, refs, cond_scores, idx)
+        resampled_deltas.append(cond_score - sft_score)
+    resampled_deltas.sort()
+    ci_lo = resampled_deltas[int(0.025 * n_resamples)]
+    ci_hi = resampled_deltas[int(0.975 * n_resamples) - 1]
+    # p-value: how often the resampled delta falls on the OPPOSITE side of
+    # zero from the observed point estimate, doubled for a two-sided test.
+    if point_delta >= 0:
+        p_value = 2 * sum(1 for d in resampled_deltas if d <= 0) / n_resamples
+    else:
+        p_value = 2 * sum(1 for d in resampled_deltas if d >= 0) / n_resamples
+    return {"ci": [ci_lo, ci_hi], "p_value": min(p_value, 1.0)}
 
 
 def evaluate_one(lang: str, direction: str, experiment: str, seed: int) -> dict:
@@ -67,7 +106,11 @@ def evaluate_one(lang: str, direction: str, experiment: str, seed: int) -> dict:
     source_ids = test_df["source_id"].tolist()
     sources, references = test_df["source"].tolist(), test_df["gold_truth"].tolist()
 
-    translations = recap_infer.translate(sources, lang, direction, experiment=experiment)
+    try:
+        translations = recap_infer.translate(sources, lang, direction, experiment=experiment)
+    except FileNotFoundError as e:
+        print(f"[Skip] {lang}/{direction}/{experiment}: {e}")
+        return {}
 
     engine = RewardEngine(cfg.REWARD_PRESETS["recap_dpo"])  # config-agnostic for raw metric computation
     raw = engine.compute_raw_metrics(sources, translations, references, desc=f"{lang}/{direction}/{experiment}")
@@ -118,9 +161,13 @@ def evaluate_one(lang: str, direction: str, experiment: str, seed: int) -> dict:
             # Keyed by source_id so compute_deltas() can align two conditions
             # by EXAMPLE, not by list position -- two conditions can flag
             # different rows invalid, which would silently misalign a
-            # position-based zip().
+            # position-based zip(). hyp/ref text (not just scores) is stored
+            # so compute_deltas() can recompute real corpus-level BLEU/ChrF++
+            # on bootstrap resamples -- see _paired_bootstrap_test().
             "per_sentence": {
                 "source_id": [source_ids[i] for i in valid_idx],
+                "hyp": [translations[i] for i in valid_idx],
+                "ref": [references[i] for i in valid_idx],
                 "bleu": bleu_scores, "chrf": chrf_scores, "comet": comet_scores,
             },
         }
@@ -136,11 +183,21 @@ def evaluate_one(lang: str, direction: str, experiment: str, seed: int) -> dict:
 
 
 def compute_deltas(lang: str, direction: str, experiment: str, seed: int) -> dict:
-    """Delta from the SFT baseline, plus paired bootstrap CIs (Eq. 78-80).
-    Paired means paired BY EXAMPLE: SFT and the condition can flag different
-    rows invalid, so per-sentence scores are aligned by source_id (the
-    intersection of both conditions' valid sets), never by raw list
-    position."""
+    """Delta from the SFT baseline, plus paired-bootstrap 95% CIs and
+    two-sided p-values (paper section 11.10: "paired bootstrap confidence
+    intervals ... for key changes from SFT"). Paired means paired BY
+    EXAMPLE: SFT and the condition can flag different rows invalid, so
+    per-sentence scores are aligned by source_id (the intersection of both
+    conditions' valid sets), never by raw list position. Cached to disk like
+    evaluate_one(), so report-table generation never needs to recompute it."""
+    if experiment == "sft":
+        return {}  # SFT has no delta from itself
+
+    out_path = cfg.deltas_path(lang, direction, experiment, seed)
+    if out_path.exists():
+        with open(out_path) as f:
+            return json.load(f)
+
     sft_report = evaluate_one(lang, direction, "sft", seed)
     cond_report = evaluate_one(lang, direction, experiment, seed)
     if not sft_report.get("per_sentence") or not cond_report.get("per_sentence"):
@@ -155,15 +212,26 @@ def compute_deltas(lang: str, direction: str, experiment: str, seed: int) -> dic
     if not common_ids:
         return {}
 
-    deltas = {"n_paired": len(common_ids)}
+    sft_hyps = [sft_report["per_sentence"]["hyp"][sft_pos[sid]] for sid in common_ids]
+    cond_hyps = [cond_report["per_sentence"]["hyp"][cond_pos[sid]] for sid in common_ids]
+    refs = [sft_report["per_sentence"]["ref"][sft_pos[sid]] for sid in common_ids]
+
+    deltas = {
+        "lang": lang, "direction": direction, "experiment": experiment, "seed": seed,
+        "n_paired": len(common_ids),
+    }
     for metric in ("bleu", "chrf", "comet"):
-        sft_vals = [sft_report["per_sentence"][metric][sft_pos[sid]] for sid in common_ids]
-        cond_vals = [cond_report["per_sentence"][metric][cond_pos[sid]] for sid in common_ids]
-        per_sentence_delta = [c - s for c, s in zip(cond_vals, sft_vals)]
+        sft_scores = [sft_report["per_sentence"][metric][sft_pos[sid]] for sid in common_ids]
+        cond_scores = [cond_report["per_sentence"][metric][cond_pos[sid]] for sid in common_ids]
         point_delta = cond_report["corpus"][metric] - sft_report["corpus"][metric]
-        ci_lo, ci_hi = _paired_bootstrap_ci(per_sentence_delta)
+        test = _paired_bootstrap_test(metric, sft_hyps, cond_hyps, refs, sft_scores, cond_scores, point_delta)
         deltas[f"delta_{metric}"] = point_delta
-        deltas[f"delta_{metric}_ci"] = [ci_lo, ci_hi]
+        deltas[f"delta_{metric}_ci"] = test["ci"]
+        deltas[f"delta_{metric}_pvalue"] = test["p_value"]
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(deltas, f, indent=2)
     return deltas
 
 
@@ -219,9 +287,18 @@ def main() -> None:
     for lang, direction, experiment in tqdm(combos, desc="Evaluating", disable=len(combos) < 2):
         deltas = compute_deltas(lang, direction, experiment, args.seed)
         if deltas:
-            tqdm.write(f"    deltas vs SFT: "
-                       f"dBLEU={deltas['delta_bleu']:.4f} dChrF++={deltas['delta_chrf']:.4f} "
-                       f"dCOMET={deltas['delta_comet']:.4f}")
+            tqdm.write(
+                f"    deltas vs SFT (95% CI, p-value):\n"
+                f"      dBLEU={deltas['delta_bleu']:+.4f} "
+                f"[{deltas['delta_bleu_ci'][0]:+.4f}, {deltas['delta_bleu_ci'][1]:+.4f}] "
+                f"p={deltas['delta_bleu_pvalue']:.3f}\n"
+                f"      dChrF++={deltas['delta_chrf']:+.4f} "
+                f"[{deltas['delta_chrf_ci'][0]:+.4f}, {deltas['delta_chrf_ci'][1]:+.4f}] "
+                f"p={deltas['delta_chrf_pvalue']:.3f}\n"
+                f"      dCOMET={deltas['delta_comet']:+.4f} "
+                f"[{deltas['delta_comet_ci'][0]:+.4f}, {deltas['delta_comet_ci'][1]:+.4f}] "
+                f"p={deltas['delta_comet_pvalue']:.3f}"
+            )
     for lang, direction in lang_direction_jobs:
         select_best_checkpoint(lang, direction, args.seed)
 
