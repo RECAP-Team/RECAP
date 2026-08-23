@@ -7,27 +7,32 @@ This guide breaks the same work into **independent job groups** you can
 submit separately, with the dependency rules between them made explicit, so
 you know exactly what can run in parallel and what has to wait.
 
+**Scope**: Bhili and Mundari only (`config.py`'s `LANGUAGES`) — Gondi is
+excluded from the paper and `--lang Gondi` is no longer a valid argument
+anywhere in the pipeline.
+
 Every command below is copy-pasteable from `RECAP/code/`.
 
 **Before committing to any of this on real HPC time**, smoke-test the whole
-pipeline on a tiny slice of data first — see §14.
+pipeline on a tiny slice of data first — see §11. `smoke_test_bhili.bash`
+and `smoke_test_mundari.bash` (also in `code/`) run that entire smoke test,
+both directions, in one command each — see §11d.
 
 **Multi-GPU (`torchrun`)**: if you have multiple A100s to dedicate to a
-*single* job, Groups B, C, D, E (DPO/GRPO/PPO training — all 78 commands)
-support `torchrun` out of the box, since all three trainers are built on
-`accelerate` (TRL's `DPOTrainer`/`PPOTrainer`, and our own scratch GRPO loop)
-and auto-detect the distributed environment `torchrun` sets up — no code
-changes needed, and every DDP-safety mechanism already in the code (rank-aware
-sampling, NCCL timeout, frozen reference models never DDP-wrapped) applies
-identically under `torchrun`. Groups A, F, G, H (data prep, evaluate, report,
-human-eval) are CPU-only or single-process as written — `torchrun` doesn't
-apply to them (Group F specifically has no data-parallel sharding built in
-yet; wrapping it in `torchrun` would just make every rank redundantly
-evaluate the same thing, not go faster). All 78 commands in §3-§6 below are
-given in `torchrun` form; set `NGPUS_PER_JOB` once per shell session:
+*single* job, all 52 training commands below support `torchrun` out of the
+box, since all three trainers are built on `accelerate` (TRL's
+`DPOTrainer`/`PPOTrainer`, and our own scratch GRPO loop) and auto-detect
+the distributed environment `torchrun` sets up — no code changes needed, and
+every DDP-safety mechanism already in the code (rank-aware sampling, NCCL
+timeout, frozen reference models never DDP-wrapped) applies identically
+under `torchrun`. Data prep, evaluate, report, and human-eval are CPU-only
+or single-process as written — `torchrun` doesn't apply to them (evaluate
+specifically has no data-parallel sharding built in yet; wrapping it in
+`torchrun` would just have every rank redundantly evaluate the same thing,
+not go faster). Set `NGPUS_PER_JOB` once per shell session:
 
 ```bash
-export NGPUS_PER_JOB=2   # how many A100s ONE job gets -- see the tradeoff note in §3
+export NGPUS_PER_JOB=2   # how many A100s ONE job gets -- see the tradeoff note in §1
 ```
 
 ---
@@ -35,19 +40,19 @@ export NGPUS_PER_JOB=2   # how many A100s ONE job gets -- see the tradeoff note 
 ## 0. Dependency graph (the whole thing, at a glance)
 
 ```
-Group A (data prep, x6, per direction)
+Group A (data prep, x4, per direction)
    |
-   +--> Group B (DPO training, x60, per direction x experiment)
+   +--> Group B (DPO training, x40, per direction x experiment)
    |        |
-   |        +--> Group D (recap_dpo_grpo, x6) -- needs THIS direction's
+   |        +--> Group D (recap_dpo_grpo, x4) -- needs THIS direction's
    |                                              Group B "recap_dpo" run done
    |
-   +--> Group C (sft_grpo, x6, per direction)
+   +--> Group C (sft_grpo, x4, per direction)
    |
-   +--> Group E (sft_ppo, x6, per direction)
+   +--> Group E (sft_ppo, x4, per direction)
                 |
                 v
-        Group F (evaluate, x1 or x6) -- needs everything above done
+        Group F (evaluate, x1 or x4) -- needs everything above done
                 |
                 v
         Group G (report tables + plots, x1) -- needs Group F done
@@ -58,7 +63,10 @@ Group A (data prep, x6, per direction)
 
 Nothing in Groups B, C, D, E writes to any other group's files, so within a
 group every job is safe to run at the same time as every other job in that
-group (and in most cases, across groups too — see the table below).
+group (and in most cases, across groups too — see the table below). §3
+below presents these same B/C/D/E jobs in a different order — main
+experiments before ablations, grouped by language — while the dependency
+rules here don't change.
 
 ---
 
@@ -66,35 +74,34 @@ group (and in most cases, across groups too — see the table below).
 
 | Group | What | # jobs | GPU? | Can start when... | Max parallel |
 |---|---|---|---|---|---|
-| **A** | Stages 1-5 (split/calibrate/score/mine/balance), one job per direction | 6 | No | immediately | 6 (all at once) |
-| **B** | Stage 6 DPO training, one job per (lang, direction, experiment) | 60 | Yes | Group A done **for that direction** | up to 60 (GPU-limited) |
-| **C** | Stage 7 GRPO, `sft_grpo` (from SFT), one job per direction | 6 | Yes | Group A done for that direction | up to 6, and can run alongside B/E |
-| **D** | Stage 7 GRPO, `recap_dpo_grpo` (from DPO), one job per direction | 6 | Yes | that direction's **Group B `recap_dpo` job** finished | up to 6, once each direction's B/recap_dpo is done |
-| **E** | Stage 8 PPO, `sft_ppo`, one job per direction | 6 | Yes | Group A done for that direction | up to 6, and can run alongside B/C |
-| **F** | Stage 9 evaluate | 1 (or 6, per direction) | Yes (decoding) | all of B, C, D, E finished | 1, or 6 if split by direction |
+| **A** | Stages 1-5 (split/calibrate/score/mine/balance), one job per direction | 4 | No | immediately | 4 (all at once) |
+| **B** | Stage 6 DPO training, one job per (lang, direction, experiment) — 4 main-matrix + 6 ablation experiments | 40 | Yes | Group A done **for that direction** | up to 40 (GPU-limited) |
+| **C** | Stage 7 GRPO, `sft_grpo` (from SFT), one job per direction | 4 | Yes | Group A done for that direction | up to 4, and can run alongside B/E |
+| **D** | Stage 7 GRPO, `recap_dpo_grpo` (from DPO), one job per direction | 4 | Yes | that direction's **Group B `recap_dpo` job** finished | up to 4, once each direction's B/recap_dpo is done |
+| **E** | Stage 8 PPO, `sft_ppo`, one job per direction | 4 | Yes | Group A done for that direction | up to 4, and can run alongside B/C |
+| **F** | Stage 9 evaluate | 1 (or 4, per direction) | Yes (decoding) | all of B, C, D, E finished | 1, or 4 if split by direction |
 | **G** | Stage 11 tables + plots | 1 | No | Group F done | 1 |
 | **H** | Stage 11 human-eval sample + analysis | 2 (sequential, human step between) | No | Group G (or just Group F) done | 1 |
 
 **Practical read:** after Group A finishes for a direction, you can fire off
 that direction's 10 DPO jobs (Group B) + 1 `sft_grpo` job (Group C) + 1
-`sft_ppo` job (Group E) all at once — 12 simultaneous jobs per direction, 72
-across all 6 directions, GPU-availability permitting. The scheduler queues
+`sft_ppo` job (Group E) all at once — 12 simultaneous jobs per direction, 48
+across all 4 directions, GPU-availability permitting. The scheduler queues
 whatever doesn't fit immediately. Only Group D needs an explicit wait.
 
 **GPUs-per-job vs. jobs-in-parallel is a real tradeoff**: with `NGPUS_PER_JOB`
 A100s per job, you can run `total_gpus / NGPUS_PER_JOB` jobs at once. Bigger
 `NGPUS_PER_JOB` speeds up any ONE run's wall-clock (data-parallel DDP) but
 leaves fewer GPUs free for OTHER jobs to run alongside it. With `NGPUS_PER_JOB=1`
-you get maximum job-level parallelism (matches the plain single-GPU commands
-from earlier revisions of this guide — just drop the `torchrun --standalone
---nproc_per_node=$NGPUS_PER_JOB` prefix and call the script directly). For the
-60K+-row directions' `recap_dpo`/`recap_dpo_grpo`/`sft_ppo` runs, 2-4 GPUs per
-job is a reasonable starting point; the smaller ablation-preset DPO runs
-(fewer retained pairs) may not need more than 1.
+you get maximum job-level parallelism — just drop the `torchrun --standalone
+--nproc_per_node=$NGPUS_PER_JOB` prefix and call the script directly. For
+`recap_dpo`/`recap_dpo_grpo`/`sft_ppo` runs, 2-4 GPUs per job is a reasonable
+starting point; the smaller ablation-preset DPO runs (fewer retained pairs)
+may not need more than 1.
 
 ---
 
-## 2. Group A — data prep (6 independent jobs, no GPU)
+## 2. Group A — data prep (4 independent jobs, no GPU)
 
 One job per direction. Cheap (CPU-only, metrics come from `maha_data_2`'s
 stored columns, no COMET reload) — a few minutes each. Each job runs Stages
@@ -118,27 +125,13 @@ python recap_mine_pairs.py --lang Bhili --direction tgt2hi
 python recap_balance_pairs.py --lang Bhili --direction tgt2hi
 
 # Job A3
-python recap_split.py --lang Gondi --direction hi2tgt
-python recap_calibrate.py --lang Gondi --direction hi2tgt
-python recap_score.py --lang Gondi --direction hi2tgt
-python recap_mine_pairs.py --lang Gondi --direction hi2tgt
-python recap_balance_pairs.py --lang Gondi --direction hi2tgt
-
-# Job A4
-python recap_split.py --lang Gondi --direction tgt2hi
-python recap_calibrate.py --lang Gondi --direction tgt2hi
-python recap_score.py --lang Gondi --direction tgt2hi
-python recap_mine_pairs.py --lang Gondi --direction tgt2hi
-python recap_balance_pairs.py --lang Gondi --direction tgt2hi
-
-# Job A5
 python recap_split.py --lang Mundari --direction hi2tgt
 python recap_calibrate.py --lang Mundari --direction hi2tgt
 python recap_score.py --lang Mundari --direction hi2tgt
 python recap_mine_pairs.py --lang Mundari --direction hi2tgt
 python recap_balance_pairs.py --lang Mundari --direction hi2tgt
 
-# Job A6
+# Job A4
 python recap_split.py --lang Mundari --direction tgt2hi
 python recap_calibrate.py --lang Mundari --direction tgt2hi
 python recap_score.py --lang Mundari --direction tgt2hi
@@ -146,26 +139,92 @@ python recap_mine_pairs.py --lang Mundari --direction tgt2hi
 python recap_balance_pairs.py --lang Mundari --direction tgt2hi
 ```
 
-Given how cheap these are, running all 6 as one sequential job is also
-perfectly reasonable if you'd rather not manage 6 tiny job submissions.
+Given how cheap these are, running all 4 as one sequential job is also
+perfectly reasonable if you'd rather not manage 4 tiny job submissions.
 
 ---
 
-## 3. Group B — DPO training (60 independent jobs, GPU, `torchrun`)
+## 3. Training jobs, in priority order — main experiments first (by language), then ablations
 
-One job = one `(lang, direction, experiment)`. All 60 are mutually
-independent (each only touches its own `recap_dpo/<lang>/<direction>/<experiment>/`
-folder). The 10 experiments per direction:
-`dpo_raw, dpo_quality_only, dpo_no_confidence, recap_dpo, ablation_quality_only,
-ablation_quality_plus_rep, ablation_quality_plus_len, ablation_full_reward,
-ablation_full_reward_margin, ablation_full_recap`.
+This is the same 52 jobs as Groups B/C/D/E above, reordered so you can
+launch and track them by what matters most first: get both languages'
+**headline results** (the main matrix) running before spending GPU time on
+the **ablations** that explain *why* the headline result looks the way it
+does. Within each block, commands are tagged with their originating Group
+letter (B/C/D/E — see §0/§1 for the dependency rules behind that letter).
+
+Each language's main-experiment block is **14 jobs**: 12 are mutually
+independent and launchable together the moment that direction's Group A is
+done; the 2 `recap_dpo_grpo` jobs (Group D) must each wait for their own
+direction's `recap_dpo` (Group B) run to finish first.
+
+### 3.1 Bhili — main experiments (14 jobs)
+
+**Launch together (12, no dependencies beyond Group A):**
 
 ```bash
-# --- Bhili / hi2tgt ---
+# --- Bhili / hi2tgt (Group B x4, Group C x1, Group E x1) ---
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment dpo_raw
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment dpo_quality_only
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment dpo_no_confidence
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment recap_dpo
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Bhili --direction hi2tgt --experiment sft_grpo
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py  --lang Bhili --direction hi2tgt --experiment sft_ppo
+
+# --- Bhili / tgt2hi (Group B x4, Group C x1, Group E x1) ---
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment dpo_raw
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment dpo_quality_only
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment dpo_no_confidence
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment recap_dpo
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Bhili --direction tgt2hi --experiment sft_grpo
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py  --lang Bhili --direction tgt2hi --experiment sft_ppo
+```
+
+**Wait for `recap_dpo` above to finish, then launch (2, Group D):**
+
+```bash
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Bhili --direction hi2tgt --experiment recap_dpo_grpo
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Bhili --direction tgt2hi --experiment recap_dpo_grpo
+```
+
+### 3.2 Mundari — main experiments (14 jobs)
+
+**Launch together (12):**
+
+```bash
+# --- Mundari / hi2tgt ---
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment dpo_raw
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment dpo_quality_only
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment dpo_no_confidence
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment recap_dpo
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Mundari --direction hi2tgt --experiment sft_grpo
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py  --lang Mundari --direction hi2tgt --experiment sft_ppo
+
+# --- Mundari / tgt2hi ---
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment dpo_raw
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment dpo_quality_only
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment dpo_no_confidence
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment recap_dpo
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Mundari --direction tgt2hi --experiment sft_grpo
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py  --lang Mundari --direction tgt2hi --experiment sft_ppo
+```
+
+**Wait for `recap_dpo` above to finish, then launch (2):**
+
+```bash
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Mundari --direction hi2tgt --experiment recap_dpo_grpo
+torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Mundari --direction tgt2hi --experiment recap_dpo_grpo
+```
+
+### 3.3 Bhili — ablations (12 jobs, all mutually independent — launch together)
+
+Preference-construction cumulative ablation (paper Table 8) — each step adds
+one more piece on top of the last, so the order below is meaningful even
+though all 12 jobs are launchable at once:
+`ablation_quality_only -> +rep -> +len -> full_reward -> +margin -> full_recap`.
+
+```bash
+# --- Bhili / hi2tgt ---
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment ablation_quality_only
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment ablation_quality_plus_rep
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment ablation_quality_plus_len
@@ -174,46 +233,23 @@ torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang 
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment ablation_full_recap
 
 # --- Bhili / tgt2hi ---
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment dpo_raw
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment dpo_quality_only
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment dpo_no_confidence
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment recap_dpo
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment ablation_quality_only
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment ablation_quality_plus_rep
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment ablation_quality_plus_len
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment ablation_full_reward
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment ablation_full_reward_margin
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction tgt2hi --experiment ablation_full_recap
+```
 
-# --- Gondi / hi2tgt ---
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction hi2tgt --experiment dpo_raw
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction hi2tgt --experiment dpo_quality_only
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction hi2tgt --experiment dpo_no_confidence
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction hi2tgt --experiment recap_dpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction hi2tgt --experiment ablation_quality_only
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction hi2tgt --experiment ablation_quality_plus_rep
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction hi2tgt --experiment ablation_quality_plus_len
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction hi2tgt --experiment ablation_full_reward
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction hi2tgt --experiment ablation_full_reward_margin
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction hi2tgt --experiment ablation_full_recap
+### 3.4 Mundari — ablations (12 jobs, all mutually independent — launch together)
 
-# --- Gondi / tgt2hi ---
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction tgt2hi --experiment dpo_raw
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction tgt2hi --experiment dpo_quality_only
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction tgt2hi --experiment dpo_no_confidence
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction tgt2hi --experiment recap_dpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction tgt2hi --experiment ablation_quality_only
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction tgt2hi --experiment ablation_quality_plus_rep
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction tgt2hi --experiment ablation_quality_plus_len
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction tgt2hi --experiment ablation_full_reward
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction tgt2hi --experiment ablation_full_reward_margin
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Gondi --direction tgt2hi --experiment ablation_full_recap
+Recall from `dataset_statistics.csv`: Mundari's baseline repetition rate is
+5-10x Bhili's, so the `ablation_quality_plus_rep` step here is the one most
+likely to show a real, detectable effect — worth watching for that
+specifically once these land.
 
+```bash
 # --- Mundari / hi2tgt ---
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment dpo_raw
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment dpo_quality_only
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment dpo_no_confidence
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment recap_dpo
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment ablation_quality_only
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment ablation_quality_plus_rep
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment ablation_quality_plus_len
@@ -222,10 +258,6 @@ torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang 
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction hi2tgt --experiment ablation_full_recap
 
 # --- Mundari / tgt2hi ---
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment dpo_raw
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment dpo_quality_only
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment dpo_no_confidence
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment recap_dpo
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment ablation_quality_only
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment ablation_quality_plus_rep
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment ablation_quality_plus_len
@@ -234,71 +266,24 @@ torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang 
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Mundari --direction tgt2hi --experiment ablation_full_recap
 ```
 
-All 60 lines above, one line = one job, each using `$NGPUS_PER_JOB` A100s via
-DDP (matches the `qsub -I ... -lngpus=$NGPUS_PER_JOB` pattern — see §7 for
-wrapping these as batch jobs). Drop the `torchrun --standalone
---nproc_per_node=$NGPUS_PER_JOB` prefix and call `python recap_train_dpo.py
-...` directly for plain single-GPU, single-process runs instead.
+**Total: 14 + 14 + 12 + 12 = 52 jobs** (28 main-matrix + 24 ablation), matching
+§0/§1's Group B(40) + C(4) + D(4) + E(4) breakdown exactly — this section is
+just that same set of jobs presented in submission-priority order instead of
+grouped by trainer type.
 
-Each is independently resumable (see §11) if a job dies mid-training, so it's
-safe to just resubmit the exact same line.
-
----
-
-## 4. Group C — pure GRPO, `sft_grpo` (6 independent jobs, GPU, `torchrun`)
-
-Only needs Group A (SFT checkpoint is pre-existing, never trained here).
-Independent of Group B entirely.
-
-```bash
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Bhili   --direction hi2tgt --experiment sft_grpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Bhili   --direction tgt2hi --experiment sft_grpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Gondi   --direction hi2tgt --experiment sft_grpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Gondi   --direction tgt2hi --experiment sft_grpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Mundari --direction hi2tgt --experiment sft_grpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Mundari --direction tgt2hi --experiment sft_grpo
-```
+All jobs above are independently resumable (see §8) if one dies mid-training,
+so it's safe to just resubmit the exact same line. Drop the `torchrun
+--standalone --nproc_per_node=$NGPUS_PER_JOB` prefix and call `python
+recap_train_*.py ...` directly for plain single-GPU, single-process runs
+instead.
 
 ---
 
-## 5. Group D — RECAP-DPO+GRPO, `recap_dpo_grpo` (6 jobs, GPU, `torchrun`, has a dependency)
+## 4. Wrapping one line as an HPC job
 
-Each job here **requires that same (lang, direction)'s Group B `recap_dpo` run
-to have already finished** (it initializes from that checkpoint). Submit
-these only after the corresponding `recap_dpo` line from §3 has completed —
-or use a scheduler-level dependency (§7).
-
-```bash
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Bhili   --direction hi2tgt --experiment recap_dpo_grpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Bhili   --direction tgt2hi --experiment recap_dpo_grpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Gondi   --direction hi2tgt --experiment recap_dpo_grpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Gondi   --direction tgt2hi --experiment recap_dpo_grpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Mundari --direction hi2tgt --experiment recap_dpo_grpo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_grpo.py --lang Mundari --direction tgt2hi --experiment recap_dpo_grpo
-```
-
----
-
-## 6. Group E — PPO, `sft_ppo` (6 independent jobs, GPU, `torchrun`)
-
-Only needs Group A. Independent of everything else.
-
-```bash
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py --lang Bhili   --direction hi2tgt --experiment sft_ppo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py --lang Bhili   --direction tgt2hi --experiment sft_ppo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py --lang Gondi   --direction hi2tgt --experiment sft_ppo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py --lang Gondi   --direction tgt2hi --experiment sft_ppo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py --lang Mundari --direction hi2tgt --experiment sft_ppo
-torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py --lang Mundari --direction tgt2hi --experiment sft_ppo
-```
-
----
-
-## 7. Wrapping one line as an HPC job
-
-Every line in Groups B/C/D/E is a `$NGPUS_PER_JOB`-GPU job. Using the
-interactive pattern already established for this project, requesting as many
-GPUs as `NGPUS_PER_JOB`:
+Every line in §3 is a `$NGPUS_PER_JOB`-GPU job. Using the interactive
+pattern already established for this project, requesting as many GPUs as
+`NGPUS_PER_JOB`:
 
 ```bash
 qsub -I -P misn.mota2.spons -N recap_dpo_bhili_hi2tgt -lselect=1:ncpus=1:ngpus=2 -lwalltime=08:00:00
@@ -308,7 +293,7 @@ export NGPUS_PER_JOB=2
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment recap_dpo
 ```
 
-For non-interactive batch submission (recommended once you're launching 60+
+For non-interactive batch submission (recommended once you're launching 40+
 of these), put the same lines in a small `.pbs` script and `qsub` it directly
 instead of `-I` — note `ngpus` in the resource request must match
 `--nproc_per_node`:
@@ -339,7 +324,7 @@ cd /flash/scai/msr/aiy237528/final-climb-adivaani/RECAP/code
 python recap_train_dpo.py --lang Bhili --direction hi2tgt --experiment recap_dpo
 ```
 
-`qsub job.pbs` for each of the 60+12+6 lines above (swap in each job's exact
+`qsub job.pbs` for each of the 40+8+4 lines above (swap in each job's exact
 command). If your PBS setup supports job dependencies, chain Group D behind
 its Group B counterpart instead of watching for completion manually:
 
@@ -348,20 +333,20 @@ qsub -W depend=afterok:<job_id_of_recap_dpo_run> recap_dpo_grpo_job.pbs
 ```
 
 Walltime above (`08:00:00`) is a placeholder — size it to the dataset (a
-50K-row direction's `recap_dpo` run will take longer than a small ablation
-preset with a heavily-filtered pair set) and adjust per job; more GPUs per
-job (`NGPUS_PER_JOB`) should let you shrink it via DDP speedup.
+full-scale direction's `recap_dpo` run will take longer than a small
+ablation preset with a heavily-filtered pair set) and adjust per job; more
+GPUs per job (`NGPUS_PER_JOB`) should let you shrink it via DDP speedup.
 
 ---
 
-## 8. Group F — evaluation (after everything trained)
+## 5. Group F — evaluation (after everything trained)
 
 ```bash
 python recap_evaluate.py
 ```
 
-Runs everything (all 14 experiments x all 6 directions) in one process. Can
-also be split into 6 per-direction jobs (`--lang X --direction Y`, no
+Runs everything (all 14 experiments x all 4 directions) in one process. Can
+also be split into 4 per-direction jobs (`--lang X --direction Y`, no
 `--experiment`) if you'd rather not wait for every direction's training to
 finish before evaluating any of them. **No `torchrun`** — `recap_evaluate.py`
 (via `recap_infer.py`) is a single-process, single-GPU decode/score loop with
@@ -398,7 +383,7 @@ python recap_evaluate.py
 
 ---
 
-## 9. Group G — reporting (after Group F)
+## 6. Group G — reporting (after Group F)
 
 ```bash
 python recap_report_tables.py
@@ -421,9 +406,14 @@ significance marker from the p-value, e.g. `+0.021 [+0.008, +0.034]**`
 using `*` p<0.05, `**` p<0.01 (or just report `p=0.006` directly — either
 is standard, pick one and use it consistently across all tables).
 
+`recap_report_plots.py` also writes Figures 5/6/7 — DPO/GRPO/PPO train+val
+curves, one PNG per (lang, direction, experiment), read from `train_log.jsonl`
+/`val_log.jsonl` next to each checkpoint (only exists for runs trained after
+this logging was added — see each trainer's own code for what's captured).
+
 ---
 
-## 10. Group H — Table 10 human validation (after Group G, human-in-the-loop)
+## 7. Group H — Table 10 human validation (after Group G, human-in-the-loop)
 
 ```bash
 python recap_sample_for_human_eval.py --experiment recap_dpo --n 500
@@ -433,7 +423,7 @@ python recap_human_eval_analysis.py --labeled_csv ../recap_human_eval/sample_rec
 
 ---
 
-## 11. Resume — what happens if a job dies mid-run
+## 8. Resume — what happens if a job dies mid-run
 
 All three trainers are now resumable (walltime limits / preemption /
 crashes on HPC are common enough that this matters), and this works
@@ -445,8 +435,10 @@ identically whether the job was launched with `torchrun` or plain `python`:
   completed` and exits — safe to blindly resubmit any line above.
 - **DPO** (`recap_train_dpo.py`): uses HF Trainer's own
   `resume_from_checkpoint` against its periodic `trainer_state/checkpoint-*`
-  saves. Also re-evaluates any already-saved best-validation checkpoint on
-  resume so it doesn't lose track of the best score found before the crash.
+  saves (only the single most recent one is kept — `save_total_limit=1` —
+  not every checkpoint ever saved). Also re-evaluates any already-saved
+  best-validation checkpoint on resume so it doesn't lose track of the best
+  score found before the crash.
 - **GRPO / PPO** (hand-rolled loops): save a `latest_state/` snapshot every
   `save_steps` updates via `accelerate`'s own `save_state()`/`load_state()`
   (model + optimizer + RNG, DDP-safe) plus a small JSON with the loop step
@@ -462,18 +454,20 @@ GPU count as before) — no manual cleanup needed.
 
 ---
 
-## 12. Multi-seed (optional, not in the default job list above)
+## 9. Multi-seed (optional, not in the default job list above)
 
-`config.py`'s `SEEDS = [13, 42, 2026]`. The paper asks for seed mean +- std
-"whenever possible" for the learning conditions. To add this, repeat Groups
-B/C/D/E with `--seed 42` and `--seed 2026` appended to each command (and
-`recap_evaluate.py --seed 42` / `--seed 2026` for Group F) -- this triples
-the 78 training jobs to 234. Left out of the default list above; add it once
-the single-seed pass looks sane.
+`config.py`'s uncertainty reporting comes from paired-bootstrap CI/p-values
+at evaluation time (§5), not from retraining with multiple seeds — one
+training seed (13) per experiment is the actual plan. `SEEDS = [13, 42, 2026]`
+is a leftover constant from an earlier plan and isn't consumed anywhere; if
+you do decide you want true multi-seed training variance on top of the
+bootstrap CIs, repeat §3 with `--seed 42` and `--seed 2026` appended to each
+command (and `recap_evaluate.py --seed 42` / `--seed 2026` for Group F) —
+this triples the 52 training jobs to 156.
 
 ---
 
-## 13. What's explicitly NOT in this guide (separate scope)
+## 10. What's explicitly NOT in this guide (separate scope)
 
 The 8 targeted ablations from `IMPLEMENTATION_PLAN.md` (candidate-diversity,
 calibration-method, confidence/delta-grid, pair-selection-strategy,
@@ -485,9 +479,9 @@ are currently runnable.
 
 ---
 
-## 14. Smoke-testing on a small slice of data first
+## 11. Smoke-testing on a small slice of data first
 
-Don't launch 78 real GPU jobs against the full ~200K-row datasets without
+Don't launch 52 real GPU jobs against the full ~200K-row datasets without
 first checking the pipeline actually runs end-to-end. `recap_split.py`
 supports a `--n_samples N` flag that randomly samples N rows from
 `maha_data_2` **before** splitting -- every downstream stage (calibrate,
@@ -512,9 +506,10 @@ Notes:
 - `--n_samples` requires `--lang`/`--direction` (no bulk/loop-all mode) --
   this is deliberate, so you can't accidentally shrink every direction's
   real data at once.
-- The 80/10/10 split still applies to the sampled rows, so `--n_samples 200`
-  gives ~160/20/20 train/val/test -- small enough that DPO training finishes
-  in minutes, not hours, and you can quickly check nothing crashes, the
+- The split ratios still apply to the sampled rows (`config.py`'s
+  `SPLIT_RATIOS`, currently ~99/0.25/0.5), so at `--n_samples 200` the
+  val/test slices are tiny -- small enough that DPO training finishes in
+  minutes, not hours, and you can quickly check nothing crashes, the
   pre-flight checks pass, and the eval report looks sane.
 - **Before a real run for the same `(lang, direction)`**, delete the test
   output first: `rm -rf recap_splits/<lang>/<direction>/` (and anything
@@ -526,17 +521,19 @@ Notes:
 - GRPO/PPO don't need a separate small-data flag for smoke-testing -- point
   `cfg.GRPO_SETTINGS.num_updates` / `cfg.PPO_SETTINGS.num_updates` down
   temporarily (e.g. 10) in `config.py` if you want a fast end-to-end check
-  of those too, alongside the small `--n_samples` split.
+  of those too, alongside the small `--n_samples` split (or just use
+  `--smoke_test`, which does exactly this via a separate settings object --
+  see §11c).
 
-### 14b. Smoke-testing the multi-GPU (`torchrun`) path specifically
+### 11b. Smoke-testing the multi-GPU (`torchrun`) path specifically
 
 The above catches logic bugs; it does **not** catch DDP-specific bugs
 (deadlocks, rank-collision in sampling, a hang on an NCCL barrier) since it
 never launches more than one process. Those are exactly the bugs you don't
-want to discover 3 hours into a real 60K-row `torchrun --nproc_per_node=4`
-run. Once §14's single-GPU smoke test passes, re-run the SAME tiny
+want to discover 3 hours into a real full-scale `torchrun --nproc_per_node=4`
+run. Once §11's single-GPU smoke test passes, re-run the SAME tiny
 `--n_samples` split under `torchrun` with 2+ GPUs before trusting the full
-job list in §3-§6:
+job list in §3:
 
 ```bash
 export NGPUS_PER_JOB=2   # or however many GPUs you'll actually use per job
@@ -553,32 +550,35 @@ rm -rf ../recap_ppo/bhili/hi2tgt/sft_ppo
 torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py --lang Bhili --direction hi2tgt --experiment sft_ppo
 ```
 
-If these finish (even a handful of updates for GRPO/PPO, per §14's
+If these finish (even a handful of updates for GRPO/PPO, per §11's
 `num_updates` tip) without hanging or erroring, the DDP path — rank-aware
 sampling, the NCCL timeout, frozen-reference isolation — is confirmed working
 before you commit real GPU-hours to it.
 
-### 14c. Full end-to-end smoke test — every stage, every experiment/ablation, ONE direction, `torchrun`
+### 11c. Full end-to-end smoke test — every stage, every experiment/ablation, ONE direction, `torchrun`
 
-§14 only exercised one experiment (`recap_dpo`) to check the pipeline isn't
+§11 only exercised one experiment (`recap_dpo`) to check the pipeline isn't
 broken. This is the thorough version: every stage, all 14 experiments/
 ablations, for a single `(lang, direction)` — so nothing about any specific
 ablation's code path (data OR the multi-GPU path) is untested before the real
-78-job run.
+52-job run. **§11d below wraps exactly this flow, both directions of one
+language at once, into a single script** — read this section first to
+understand what it's doing, then use the script instead of typing these out
+by hand.
 
 Two things make this fast without any manual `config.py` editing or reverting:
 
-- **`--n_samples 200`** on Stage 1 (as in §14) — shrinks the dataset.
+- **`--n_samples 200`** on Stage 1 (as in §11) — shrinks the dataset.
 - **`--smoke_test`** on every Stage 6/7/8 command — swaps in
   `DPO_SETTINGS_SMOKE_TEST` / `GRPO_SETTINGS_SMOKE_TEST` /
   `PPO_SETTINGS_SMOKE_TEST` (`config.py`) instead of the real settings
   (`num_updates=10`, `eval_steps=5`, `save_steps=5`, etc.) — a **named,
   separate settings object**, not a hand-edit of the real one, so there's
-  nothing to remember to revert before the real run in §15.
+  nothing to remember to revert before the real run in §12.
 
 All Stage 6/7/8 commands below also run under `torchrun --nproc_per_node=2`
 (2 A100s), so the DDP path (rank-aware sampling, NCCL timeout, resume
-snapshotting) gets exercised too — this folds §14b's multi-GPU check into
+snapshotting) gets exercised too — this folds §11b's multi-GPU check into
 the same pass instead of a separate one. Swap `2` for however many GPUs you
 actually intend to use per job in the real run.
 
@@ -649,7 +649,7 @@ torchrun --standalone --nproc_per_node=$NGPUS_PER_JOB recap_train_ppo.py --lang 
 
 **9. Stage 9 — evaluate** (no `--experiment` = all 14, including the `sft`
 baseline needed for every delta; no `torchrun` — Stage 9 has no DDP sharding,
-see §8):
+see §5):
 
 ```bash
 python recap_evaluate.py --lang Bhili --direction hi2tgt
@@ -669,24 +669,50 @@ overkill on a 200-row test set):
 python recap_sample_for_human_eval.py --experiment recap_dpo --n 20
 ```
 
-**12. Clean up and switch to the real run per §15** (delete
+**12. Clean up and switch to the real run per §12** (delete
 `recap_splits/bhili/hi2tgt`, `recap_calib/bhili/hi2tgt`,
 `recap_rewards/bhili/hi2tgt`, `recap_pairs/bhili/hi2tgt`,
 `recap_dpo/bhili/hi2tgt`, `recap_grpo/bhili/hi2tgt`, `recap_ppo/bhili/hi2tgt`,
 `recap_eval/bhili/hi2tgt`) — then just drop `--smoke_test` (and `--n_samples`
-on Stage 1) for the real commands in §3-§6. No `config.py` revert needed:
+on Stage 1) for the real commands in §3. No `config.py` revert needed:
 `DPO_SETTINGS`/`GRPO_SETTINGS`/`PPO_SETTINGS` (the real ones) were never
 touched.
 
 If all of steps 1-11 finish without a `CheckFailure` (the 9 pre-flight
 checks) or an unhandled exception, every stage, every experiment/ablation,
 AND the multi-GPU `torchrun` path have all been exercised at least once — the
-remaining risk in the real 78-job run is scale (wall-clock, memory at full
+remaining risk in the real 52-job run is scale (wall-clock, memory at full
 dataset size and full `num_updates`), not logic.
+
+### 11d. One-shot smoke test scripts — `smoke_test_bhili.bash` / `smoke_test_mundari.bash`
+
+Both in `code/`. Each runs exactly the §11c flow — Stages 1-11, all 10 DPO
+experiments, both GRPO conditions, PPO, evaluate, and reporting — for
+**both directions** of that one language, sequentially, in a single
+command. This is the fastest way to confirm nothing is broken across the
+entire pipeline for a language before committing real GPU-hours to §3.
+
+```bash
+export NGPUS_PER_JOB=2
+bash smoke_test_bhili.bash
+# or
+bash smoke_test_mundari.bash
+```
+
+Run from a GPU-allocated session (§4's `qsub -I` pattern, or a `.pbs` job
+wrapping the `bash` call) — these scripts assume `torchrun` can actually
+reach GPUs. Each stops immediately on the first failing command (`set -e`),
+so a `CheckFailure` or crash halfway through won't silently continue into
+later stages on broken state.
+
+Once a script finishes clean, follow §12 to clean up that language's test
+output and move to the real full-scale run — nothing about `config.py`'s
+real settings was touched by the smoke test, only the smoke-test-specific
+named settings objects were used.
 
 ---
 
-## 15. Switching from a smoke test to the real full-data run
+## 12. Switching from a smoke test to the real full-data run
 
 Once the small `--n_samples` test above looks sane, move to the real run for
 that same `(lang, direction)`:
@@ -710,13 +736,13 @@ that same `(lang, direction)`:
    (swap in whichever `<lang>/<direction>` you tested with.)
 
 2. **If you temporarily lowered `num_updates`** in `config.py` for a GRPO/PPO
-   smoke test (§14's last bullet), set it back to the real value (2000 by
+   smoke test (§11's last bullet), set it back to the real value (2000 by
    default) before continuing -- otherwise the real run also stops after
    just a few updates.
 
 3. **Rerun without `--n_samples`** -- this now processes the full dataset,
-   and every stage after it (Groups B-E onward, `torchrun`-wrapped if you're
-   using multiple GPUs per job) runs exactly as documented in §2-§10 above:
+   and every stage after it (§3's jobs onward, `torchrun`-wrapped if you're
+   using multiple GPUs per job) runs exactly as documented in §2-§3 above:
 
    ```bash
    python recap_split.py --lang Bhili --direction hi2tgt
@@ -724,9 +750,9 @@ that same `(lang, direction)`:
    python recap_score.py --lang Bhili --direction hi2tgt
    python recap_mine_pairs.py --lang Bhili --direction hi2tgt
    python recap_balance_pairs.py --lang Bhili --direction hi2tgt
-   # ... then Groups B-E training commands as usual
+   # ... then §3's training commands as usual
    ```
 
 Directions you never touched with `--n_samples` don't need any of this --
 they were never shrunk, so their split is already full-size and ready to go
-straight into Groups B-E.
+straight into §3.

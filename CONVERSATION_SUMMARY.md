@@ -6,7 +6,7 @@
 > a new session, check the "Last updated" line below and ask for it to be
 > refreshed if it looks stale relative to what's actually happened since.
 
-**Last updated:** 2026-08-23 (through adding train/val loss-curve logging + plotting to all three trainers)
+**Last updated:** 2026-08-23 (through reordering JOB_GUIDE.md and adding per-language smoke-test scripts)
 
 ---
 
@@ -87,26 +87,47 @@
   Bhili/hi2tgt runs predate this feature and have no `train_log.jsonl`/
   `val_log.jsonl`; `recap_report_plots.py`'s new Figures 5/6/7 will silently
   produce nothing for them until something is trained again.
-- **Immediate pending action (still outstanding, unrelated to any of the
-  above)**: the user was re-running
-  `python recap_evaluate.py --lang Bhili --direction hi2tgt` (needed to
-  regenerate `report.json`/`deltas_vs_sft.json` under the significance-testing
-  schema from §2.15/§2.16) and interrupted it partway through (at the
-  `recap_dpo` experiment) because it looked stuck — it wasn't; the
-  paired-bootstrap significance test is just slow (~140s/experiment,
-  recomputes `sacrebleu.corpus_bleu` 2,000 times per experiment). **This
-  still needs to be finished**: rerun
-  `python recap_evaluate.py --lang Bhili --direction hi2tgt` to completion,
-  then `python recap_report_tables.py`. (Unaffected by the checkpoint
-  cleanup above — that only touched `recap_dpo/*/trainer_state/`, a
-  completely separate directory tree from `recap_eval/`.)
+- **The `recap_evaluate.py --lang Bhili --direction hi2tgt` run from §2.17
+  did complete successfully** (confirmed via `git status` later showing
+  `report.json` + `deltas_vs_sft.json` for all 11 trained experiments, plus
+  `recap_report_tables.py`/`recap_report_plots.py` output for all of
+  Tables 3-9 and Figures 1-4) — no longer a pending item.
+- **Git remote/auth state — important, read before pushing anything**:
+  - `origin` now uses **SSH**, not HTTPS:
+    `git@github.com:RECAP-Team/RECAP.git`. This cluster blocks raw port 22
+    AND direct port 443 — SSH only works because `~/.ssh/config` routes
+    `github.com` → `ssh.github.com:443` through the campus HTTP proxy via
+    `ncat --proxy ... --proxy-type http` (see §2.24). If SSH ever stops
+    working, that's the first thing to check, not GitHub itself.
+  - A dedicated key (`~/.ssh/id_ed25519_github`, not the cluster's own
+    `id_rsa`) is registered on GitHub account `raja17021998` as
+    `pragya-recap-cluster`.
+  - **The remote's `main` branch is gone** — deleted at some point outside
+    this session (not by me); `RECAP-Team/RECAP` now has only `master`,
+    which is also the new default branch. Local `master` tracking was
+    fixed to match (`origin/master`). **This may affect teammates** who
+    still expect `main` to exist — flagged to the user, not yet resolved
+    either way (recreating `main` on the remote is one `git push
+    origin master:main` away if wanted).
+  - There's an **open PR #1** on the repo (noticed incidentally via
+    `git ls-remote`, pointing at commit `312bbab`) — not investigated,
+    user was asked if they want it looked into.
+  - The broad-scope GitHub PAT that was sitting in
+    `flash/pedro/command.txt` in plaintext (`admin:enterprise`,
+    `delete_repo`, etc. — far broader than needed) was flagged as a real
+    security concern; recommended rotating it. Not rotated as of this
+    writing (SSH auth setup means it's no longer needed for routine git
+    operations, which reduces but doesn't eliminate the exposure).
+- **`JOB_GUIDE.md` fully reordered + de-Gondi'd, smoke-test scripts added**
+  (§2.25) — the "known follow-up" about stale Gondi content is now
+  resolved. New `smoke_test_bhili.bash`/`smoke_test_mundari.bash` in
+  `code/` run the full smoke-test flow for both directions of one language
+  in a single command.
 - **Known follow-ups not yet done** (offered, not actioned — ask the user
   before doing any of these):
-  - `JOB_GUIDE.md` still has ~26 lines of explicit Gondi job commands and
-    job-count totals (e.g. "60 jobs") that assume 6 directions instead of 4.
   - `config.py`'s `SEEDS = [13, 42, 2026]` is an unused leftover constant —
-    the actual plan uses one training seed (13) per experiment (**78 total
-    training jobs**, not 234) and gets uncertainty entirely from paired
+    the actual plan uses one training seed (13) per experiment (**52 total
+    training jobs**, not 156) and gets uncertainty entirely from paired
     bootstrap CI/p-values at evaluation time, not from retraining.
   - The repetition-rate table computed in §2.20 was offered to be folded
     into `dataset_statistics.csv`/the report artifact — not yet done, ask
@@ -651,6 +672,103 @@ originally done for GRPO/PPO before they were even smoke-tested.)*
     the actual PNG output** to confirm correct layout/legends/data, not
     just "no exception."
 
+### 2.23 Git commit, then a tangled push
+- Gave the user a copy-pasteable `git commit` command (staging `code/` as a
+  whole plus the new docs/results) for them to run in their own terminal —
+  didn't run it myself, since it was framed as "give me a command."
+- User ran it and pushed; GitHub showed the commit landed
+  (`312bbab`), but `git status` also showed a second, larger batch still
+  staged-but-uncommitted, plus a puzzling `Your branch is based on
+  'origin/main', but the upstream is gone` warning, plus an unexplained
+  `test.txt`.
+- Investigated directly (same shared cluster filesystem, so `git
+  ls-remote`/`git branch -vv` from this session reflects the user's own
+  terminal's reality exactly): confirmed the remote's `main` branch no
+  longer exists at all — only `master` now, also the new GitHub default
+  branch. Not something this session did. Fixed only the local tracking
+  pointer (`git branch --set-upstream-to=origin/master master`) — did NOT
+  touch the remote, since recreating `main` affects the whole team and
+  wasn't this session's call to make unilaterally. Flagged `test.txt`
+  (unexplained, not from this session) without touching it, and gave the
+  user the one-line command for the still-pending second commit.
+
+### 2.24 GitHub token check, then permanent SSH auth
+- User selected the exact token text from `flash/pedro/command.txt`
+  (`ghp_...`, a classic PAT sitting in plaintext) and asked whether it has
+  access to `RECAP-Team/RECAP`. Checked directly against the GitHub API
+  without ever printing the token value back: authenticates as
+  `raja17021998`, full admin/push/pull on the repo, but the token's actual
+  *scope* is far broader than the repo (`admin:enterprise`, `admin:org`,
+  `delete_repo`, etc.) — flagged this as a real risk given it's sitting in
+  a general notes file, recommended rotating to a narrower fine-grained PAT.
+- User then hit the expected friction (`git push` prompting for
+  username/password every time over HTTPS) and asked for a permanent fix.
+  Offered two options; user picked **SSH** over permanently storing the
+  broad token in plaintext.
+- Setup hit a real environmental wall: this cluster blocks raw SSH (port
+  22) *and* direct connections to GitHub's port-443 SSH fallback — only
+  proxied HTTP(S) traffic works here (matches the proxy notes already in
+  `pedro/command.txt`). Diagnosed this with actual connectivity tests
+  (`/dev/tcp` probes) rather than assuming, found `ncat` (available, with
+  `--proxy --proxy-type http` support) could tunnel SSH through the same
+  HTTP proxy used for everything else, verified the tunneled connection
+  actually authenticates before building anything permanent on top of it.
+- Final setup: dedicated key `~/.ssh/id_ed25519_github` (kept separate from
+  the cluster's own login key), added to the `raja17021998` GitHub account
+  via the API (title `pragya-recap-cluster`), `~/.ssh/config` entry routing
+  `github.com` → `ssh.github.com:443` through
+  `proxy21.iitd.ernet.in:3128` via `ncat`, remote switched to
+  `git@github.com:RECAP-Team/RECAP.git`. Verified end-to-end with a real
+  `git ls-remote origin` — zero prompts, no token involved. This survives
+  across sessions (not a per-session environment variable).
+
+### 2.25 JOB_GUIDE.md reordered by priority + per-language smoke-test scripts
+- User asked (in Hindi/English mixed) for two things: (1) reorder
+  `JOB_GUIDE.md`'s command listings so main-matrix experiments come before
+  ablations, grouped by language, with parallelization noted — e.g. "all
+  Bhili main commands, all Mundari main commands, ..., then all Bhili
+  ablations, all Mundari ablations..."; (2) one combined smoke-test script
+  per language covering both directions.
+- **Caught a real scope conflict before building anything**: the user's own
+  example included Gondi throughout (main commands, ablations, and its own
+  `smoke_test_gondi.bash`), but `config.py`'s `LANGUAGES` has excluded
+  Gondi since §2.13 — any `--lang Gondi` command would fail immediately
+  with an argparse error as the code currently stands. Asked explicitly
+  rather than guessing; user confirmed: drop Gondi from this request
+  entirely.
+- Read the full existing `JOB_GUIDE.md` (733 lines) before touching it,
+  rather than editing from memory — confirmed it still had Gondi throughout
+  (job counts, all four command-listing groups) since the earlier
+  "offered, not actioned" cleanup item from §2.13 had never actually been
+  done.
+- Full rewrite: fixed every job count for the 2-language scope (78→52 total
+  training jobs; Group A 6→4, Group B 60→40, Groups C/D/E 6→4 each — all
+  cross-checked arithmetically), and replaced the old flat
+  "Group B, then C, then D, then E" command listing with a new §3
+  structured exactly as requested: §3.1 Bhili main (14 jobs: 12
+  launch-together + 2 that must wait on `recap_dpo`), §3.2 Mundari main
+  (same shape), §3.3 Bhili ablations (12, all parallel), §3.4 Mundari
+  ablations (12, all parallel) — each command tagged with its underlying
+  Group letter so the dependency rules in §0/§1 still apply.
+- This left a numbering gap (old §3 immediately followed by old §7, since
+  §4/§5/§6 — the old Group C/D/E sections — were folded into the new §3).
+  Judged that gap would read as an editing mistake to anyone opening the
+  file cold, so renumbered every subsequent section (old §7-§15 → new
+  §4-§12, including the `11b`/`11c`/`11d` subsections) — did this
+  programmatically (one regex pass over `§N` cross-references plus header
+  lines, using original-captured numbers so renamed-into-existing-number
+  collisions couldn't happen, e.g. old §15→§12 racing old §12→§9) rather
+  than by hand, then verified every single `§N` reference in the final
+  file resolves to the right target.
+- New `smoke_test_bhili.bash` / `smoke_test_mundari.bash` (`code/`,
+  executable): each runs the full former-§14c flow — all 10 DPO
+  experiments, both GRPO conditions, PPO, evaluate, reporting — for BOTH
+  directions of one language in a single `bash` command, `set -euo
+  pipefail` so it stops on first failure. Verified: `bash -n` syntax check
+  on both, and cross-checked every `--experiment` name in both scripts
+  against `config.py`'s real `EXPERIMENTS` dict keys (13/13 valid, no
+  typos) — not just assumed correct from memory.
+
 ---
 
 ## 3. Key files touched this session (for quick orientation)
@@ -667,16 +785,26 @@ originally done for GRPO/PPO before they were even smoke-tested.)*
 | `code/recap_report_tables.py` | new `table7_significance.csv`/`table8_significance.csv` builders (§2.15) |
 | `code/recap_report_plots.py` | new Figures 5/6/7 — DPO/GRPO/PPO train+val curves, one per (lang, direction, experiment) (§2.22) |
 | `code/recap_reward.py` | `_is_valid()` now catches NaN candidates, not just `None` (§2.20) |
-| `code/JOB_GUIDE.md` | real cluster paths (§2.3); significance-testing instructions + migration note (§2.15) |
+| `code/JOB_GUIDE.md` | real cluster paths (§2.3); significance-testing instructions + migration note (§2.15); full rewrite — de-Gondi'd, job counts fixed, reordered by priority/language, renumbered §0-§12 (§2.25) |
+| `code/smoke_test_bhili.bash` | new — full-pipeline smoke test, both directions, one command (§2.25) |
+| `code/smoke_test_mundari.bash` | new — same, for Mundari (§2.25) |
 | `requirements.txt` | new — pinned package versions + why (§2.4) |
 | `RESOLVE_ERRORS.md` | new — plain-language running error log, 10 entries so far (§2.8, §2.20, §2.21, append-only, keep going) |
 | `dataset_statistics.csv` | new — full dataset statistical analysis (§2.18); repetition-rate table from §2.20 not yet folded in |
 | `logs/2026-08-23_dpo_raw_bhili_hi2tgt_smoke_test.log` | new — raw smoke-test terminal output (§2.8) |
+| `.gitignore` | added ignores for all regenerable pipeline-output dirs (`recap_splits/`, `recap_calib/`, `recap_rewards/`, `recap_pairs/`, `recap_dpo/`, `recap_grpo/`, `recap_ppo/`) — `recap_eval/`/`recap_report/`/`recap_human_eval/` deliberately left trackable, by user's choice |
 | `CONVERSATION_SUMMARY.md` | this file |
 
 **Disk state note**: `recap_dpo/bhili/hi2tgt/*/seed_13/trainer_state/` was
 deleted for all 8 completed experiments as of §2.21 (was 1.26TB, now gone —
 this was dead resume-state, not the deployed models, which are untouched).
+
+**Outside the repo, but load-bearing for git to work at all**: `~/.ssh/config`
+now routes all `github.com` SSH traffic through the campus proxy on port 443
+(see §2.24) — this is machine/account state, not something `git clone`
+elsewhere would reproduce. If cloning this repo fresh on a different
+machine/account, HTTPS + a token (or a from-scratch SSH setup) is needed
+there instead.
 
 ---
 
