@@ -1,0 +1,25 @@
+{
+  "lang": "Bhili",
+  "direction": "hi2tgt",
+  "experiment": "dpo_quality_only",
+  "seed": 13,
+  "n_paired": 200,
+  "delta_bleu": -0.0023604033848950434,
+  "delta_bleu_ci": [
+    -0.011264719963113456,
+    0.005443662372023594
+  ],
+  "delta_bleu_pvalue": 0.664,
+  "delta_chrf": 0.0008287376573325456,
+  "delta_chrf_ci": [
+    -0.007449579056683475,
+    0.008260645736962002
+  ],
+  "delta_chrf_pvalue": 0.804,
+  "delta_comet": 0.0008402577042578852,
+  "delta_comet_ci": [
+    -0.0019463963806628515,
+    0.0036399714648722714
+  ],
+  "delta_comet_pvalue": 0.544
+}

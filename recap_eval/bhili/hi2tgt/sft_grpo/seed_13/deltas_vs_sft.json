@@ -1,0 +1,25 @@
+{
+  "lang": "Bhili",
+  "direction": "hi2tgt",
+  "experiment": "sft_grpo",
+  "seed": 13,
+  "n_paired": 200,
+  "delta_bleu": 0.0,
+  "delta_bleu_ci": [
+    0.0,
+    0.0
+  ],
+  "delta_bleu_pvalue": 1.0,
+  "delta_chrf": 0.0004101249525611528,
+  "delta_chrf_ci": [
+    0.0,
+    0.0012806857792095894
+  ],
+  "delta_chrf_pvalue": 0.796,
+  "delta_comet": -0.00013532713055619539,
+  "delta_comet_ci": [
+    -0.0004059813916683641,
+    0.0
+  ],
+  "delta_comet_pvalue": 0.796
+}

@@ -1,0 +1,71 @@
+# RECAP pipeline dependencies.
+#
+# Empirically verified 2026-08-23 in a dedicated `recap` conda env (cloned
+# from `starkai`, Python 3.10.20, torch 2.6.0+cu124) on the Pragya cluster --
+# all 18 pipeline modules (recap_train_dpo, recap_train_grpo, recap_train_ppo,
+# recap_evaluate, recap_infer, recap_split, recap_calibrate, recap_score,
+# recap_mine_pairs, recap_balance_pairs, recap_checks, recap_utils,
+# recap_reward, recap_preference, recap_report_tables, recap_report_plots,
+# recap_sample_for_human_eval, recap_human_eval_analysis) import cleanly
+# under this exact set of pins. Actual training runs (DDP, GPU) have not
+# been exercised yet -- this only confirms imports resolve, not that a full
+# training loop completes.
+#
+# IMPORTANT -- do NOT `pip install -r requirements.txt` in one shot into an
+# env that already has other things installed. The trl / transformers /
+# comet corner of this stack is fragile: an unconstrained joint resolve can
+# backtrack into ancient, broken versions (this happened in an earlier
+# session -- see SESSION_CONTEXT.md section 12, Problem 1, where an unpinned
+# joint install backtracked all the way to pandas==1.1.5 and failed to
+# build). Install in this exact order, one command at a time:
+#
+#   pip install "transformers==4.45.2" --no-deps
+#   pip install "trl==0.11.4" --no-deps
+#   pip install "tyro>=0.5.11"                # trl's PPOConfig imports this; needs its own deps, do NOT --no-deps
+#   pip install sentencepiece protobuf
+#   pip install unbabel-comet                  # let this one resolve its own deps freely (pytorch-lightning etc.)
+#   pip install "setuptools<81"                # see note below -- must come AFTER unbabel-comet
+#
+# and re-verify after each single install:
+#   python -c "import torch, accelerate, transformers, trl, datasets, sacrebleu, comet"
+#
+# Also remember (not a pip concern, but required for training to actually
+# run -- see SESSION_CONTEXT.md section 12, Problem 2 & 4):
+#   export PATH="$CONDA_PREFIX/bin:$PATH"   # so torchrun resolves to THIS env, not ~/.local/bin
+#   module load cuda/13.0                   # match torch.version.cuda
+#   export CUDA_HOME=/apps/cuda/13.0        # the cuda module does not set this itself
+
+# --- core ML stack ---
+torch                          # install via conda/cluster module matching your GPU driver, not pip -- do not force a version here
+accelerate==1.13.0             # verified importable against trl==0.11.4 despite trl predating accelerate 1.x
+transformers==4.45.2           # MUST stay below 4.46.0: transformers 4.46 added Trainer.get_batch_samples(),
+                                # which collides by name with trl==0.11.4's own DPOTrainer.get_batch_samples()
+                                # and silently breaks DPO training (SESSION_CONTEXT.md section 12, Problem 6)
+trl==0.11.4                    # pinned for the classic AutoModelForSeq2SeqLMWithValueHead + PPOTrainer(config,
+                                # model, ref_model, tokenizer) API recap_train_ppo.py depends on --
+                                # trl>=0.12 dropped seq2seq PPO support entirely
+tyro>=0.5.11                   # not a direct RECAP import -- trl.trainer.ppo_config imports it at module load time,
+                                # so `from trl import PPOConfig` (used by recap_train_ppo.py) fails without it
+datasets==4.8.5                # verified importable against trl==0.11.4 despite trl predating datasets 4.x
+
+# --- metrics ---
+sacrebleu==2.6.0
+unbabel-comet                  # provides comet.download_model / load_from_checkpoint (recap_reward.py).
+                                # Do not pin a version -- letting this resolve freely pulled a MODERN comet
+                                # (2.2.7, pytorch-lightning 2.6.5), not the ancient pytorch-lightning==1.6.4
+                                # combo that caused problems in an earlier, unrelated unpinned joint install.
+                                # This DOES downgrade numpy (see below) and pull in tokenizers/huggingface-hub
+                                # versions matched to transformers==4.45.2 -- expected, not a conflict.
+sentencepiece                  # required by mT5's tokenizer
+protobuf                       # required by sentencepiece-backed HF tokenizers (unbabel-comet's resolve pins protobuf==4.25.9)
+setuptools<81                  # NOT a RECAP import, but required transitively: pytorch-lightning (via unbabel-comet)
+                                # pulls in an old torchmetrics that does `from pkg_resources import ...`, and
+                                # setuptools>=81 dropped pkg_resources -- install this AFTER unbabel-comet or its
+                                # resolve may bump setuptools back past 81
+
+# --- plotting / utils ---
+matplotlib==3.10.9
+numpy==1.26.4                  # NOT 2.2.6 -- unbabel-comet's resolve downgrades numpy to this; do not fight it,
+                                # comet was the deciding constraint here
+pandas==2.3.3
+tqdm==4.67.3

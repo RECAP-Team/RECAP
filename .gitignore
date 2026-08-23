@@ -101,3 +101,26 @@ __pycache__/
 # OS files
 .DS_Store
 Maha_data/
+
+# ---------------------------------------------------------------------------
+# RECAP pipeline -- runtime-generated outputs, regenerable from
+# dataset/maha_data_2 + code/config.py, never need to be pushed. The actual
+# checkpoint/ subdirectories and *.safetensors/*.bin/*.pt files were already
+# covered above -- these are the surrounding pipeline data/metadata that
+# wasn't (run_manifest.json, pairs CSVs, reward/calibration CSVs, resume
+# state, curve logs).
+# ---------------------------------------------------------------------------
+
+# Stage 1-5 intermediate data (splits, calibration stats, scored candidates,
+# mined/balanced preference pairs -- can reach 100K+ rows at full scale)
+recap_splits/
+recap_calib/
+recap_rewards/
+recap_pairs/
+
+# Stage 6-8 training outputs -- run manifests, resume state
+# (latest_state/optimizer.bin etc.), and train/val curve logs, on top of
+# the checkpoint weights already covered above
+recap_dpo/
+recap_grpo/
+recap_ppo/

@@ -1,0 +1,5 @@
+{
+  "experiment": "dpo_raw",
+  "checkpoint_path": "/flash/scai/msr/aiy237528/final-climb-adivaani/RECAP/recap_dpo/bhili/hi2tgt/dpo_raw/seed_13/checkpoint",
+  "validation_composite": 0.421358735975649
+}
