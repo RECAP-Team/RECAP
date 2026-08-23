@@ -23,6 +23,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 from dataclasses import asdict
@@ -214,12 +215,18 @@ def process_one(lang: str, direction: str, experiment: str, seed: int, smoke_tes
             del prior_best_model
         recap_utils.wait_for_everyone()
 
+    # trl renamed DPOTrainer's tokenizer kwarg from `tokenizer` to
+    # `processing_class` partway through its version history (matching
+    # transformers' own Trainer rename) -- pick whichever this installed trl
+    # actually accepts instead of hardcoding one, so this doesn't silently
+    # break again on the next cluster's pinned trl version.
+    _tokenizer_kwarg = "processing_class" if "processing_class" in inspect.signature(DPOTrainer.__init__).parameters else "tokenizer"
     trainer = DPOTrainer(
         model=policy_model,
         ref_model=ref_model,
         args=training_args,
         train_dataset=train_dataset,
-        processing_class=tokenizer,
+        **{_tokenizer_kwarg: tokenizer},
     )
     trainer.add_callback(_make_trl_callback(val_callback))
 
