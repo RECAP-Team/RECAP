@@ -18,6 +18,7 @@ from tqdm import tqdm
 
 import config as cfg
 import recap_checks
+import recap_utils
 
 MODEL_NAMES = cfg.MODEL_NAMES
 
@@ -164,6 +165,7 @@ def main() -> None:
              "test split just gets skipped as 'already exists'.",
     )
     args = parser.parse_args()
+    recap_utils.start_run_logging("recap_split", args)
     if bool(args.lang) != bool(args.direction):
         parser.error("--lang and --direction must be given together")
     if args.n_samples is not None and args.lang is None:

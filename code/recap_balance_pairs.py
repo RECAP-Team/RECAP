@@ -19,6 +19,7 @@ import pandas as pd
 from tqdm import tqdm
 
 import config as cfg
+import recap_utils
 
 
 def process_one(lang: str, direction: str, experiment: str) -> None:
@@ -109,6 +110,7 @@ def main() -> None:
     parser.add_argument("--direction", choices=cfg.DIRECTIONS, default=None)
     parser.add_argument("--experiment", choices=list(cfg.EXPERIMENTS.keys()), default=None)
     args = parser.parse_args()
+    recap_utils.start_run_logging("recap_balance_pairs", args)
     if bool(args.lang) != bool(args.direction):
         parser.error("--lang and --direction must be given together")
 

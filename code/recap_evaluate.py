@@ -28,6 +28,7 @@ from tqdm import tqdm
 
 import config as cfg
 import recap_infer
+import recap_utils
 from recap_reward import RewardEngine
 
 N_BOOTSTRAP = 1000
@@ -275,6 +276,7 @@ def main() -> None:
     parser.add_argument("--experiment", choices=list(cfg.EXPERIMENTS.keys()), default=None)
     parser.add_argument("--seed", type=int, default=cfg.SEED)
     args = parser.parse_args()
+    recap_utils.start_run_logging("recap_evaluate", args)
     if bool(args.lang) != bool(args.direction):
         parser.error("--lang and --direction must be given together")
 

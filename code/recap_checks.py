@@ -11,6 +11,7 @@ import math
 from dataclasses import dataclass
 
 import config as cfg
+import recap_utils
 
 
 class CheckFailure(Exception):
@@ -170,5 +171,6 @@ def run_static_checks() -> list[CheckResult]:
 
 
 if __name__ == "__main__":
+    recap_utils.start_run_logging("recap_checks")
     for result in run_static_checks():
         print(f"[{'OK' if result.ok else 'FAIL'}] {result.name}: {result.message}")

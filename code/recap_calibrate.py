@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 import config as cfg
 import recap_checks
+import recap_utils
 from recap_reward import RewardEngine
 
 
@@ -75,6 +76,7 @@ def main() -> None:
     parser.add_argument("--lang", choices=cfg.LANGUAGES, default=None)
     parser.add_argument("--direction", choices=cfg.DIRECTIONS, default=None)
     args = parser.parse_args()
+    recap_utils.start_run_logging("recap_calibrate", args)
     if bool(args.lang) != bool(args.direction):
         parser.error("--lang and --direction must be given together")
 

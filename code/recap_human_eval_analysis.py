@@ -15,6 +15,7 @@ import argparse
 import pandas as pd
 
 import config as cfg
+import recap_utils
 
 
 def analyze(labeled_csv: str) -> dict:
@@ -51,6 +52,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--labeled_csv", required=True)
     args = parser.parse_args()
+    recap_utils.start_run_logging("recap_human_eval_analysis", args)
     result = analyze(args.labeled_csv)
 
     out_path = cfg.REPORT_ROOT / "tables" / "table10.csv"

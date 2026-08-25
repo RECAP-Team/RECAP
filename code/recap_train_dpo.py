@@ -323,6 +323,7 @@ def main() -> None:
                          help="Use DPO_SETTINGS_SMOKE_TEST (config.py) instead of DPO_SETTINGS -- "
                               "for a quick end-to-end check on a small --n_samples split.")
     args = parser.parse_args()
+    recap_utils.start_run_logging("recap_train_dpo", args)
     process_one(args.lang, args.direction, args.experiment, args.seed, smoke_test=args.smoke_test)
 
 

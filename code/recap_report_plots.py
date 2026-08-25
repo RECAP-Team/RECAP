@@ -20,6 +20,7 @@ import json
 import pandas as pd
 
 import config as cfg
+import recap_utils
 
 PLOTS_ROOT = cfg.REPORT_ROOT / "plots"
 
@@ -323,6 +324,7 @@ def figure_7_ppo_curves(lang: str, direction: str, experiment: str, seed: int = 
 
 
 def main() -> None:
+    recap_utils.start_run_logging("recap_report_plots")
     for experiment in PAIR_EXPERIMENTS:
         figure_1_margin_distribution(experiment)
         figure_2_model_participation(experiment)

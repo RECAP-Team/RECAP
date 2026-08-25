@@ -6,7 +6,7 @@
 > a new session, check the "Last updated" line below and ask for it to be
 > refreshed if it looks stale relative to what's actually happened since.
 
-**Last updated:** 2026-08-23 (through reordering JOB_GUIDE.md and adding per-language smoke-test scripts)
+**Last updated:** 2026-08-25 (through the Python-level `logs/` auto-logging rollout across all 15 pipeline scripts)
 
 ---
 
@@ -769,6 +769,70 @@ originally done for GRPO/PPO before they were even smoke-tested.)*
   against `config.py`'s real `EXPERIMENTS` dict keys (13/13 valid, no
   typos) — not just assumed correct from memory.
 
+### 2.26 Whenever any code runs, everything gets logged to `logs/` automatically
+- User first asked (bash-level): "Whenever I run some code, please add in
+  logs" — the 3 bash entry-point scripts (`smoke_test_bhili.bash`,
+  `smoke_test_mundari.bash`, `run_all_experiments.sh`) got `exec >
+  >(tee -a "$LOG_FILE") 2>&1` wrapping. Hit a real race condition
+  (background `tee` from process substitution can still be flushing when
+  the script exits — demonstrated with an empty log file right after a
+  "successful" run) — fixed with `TEE_PID=$!` + `trap 'exec 1>&- 2>&-;
+  wait "$TEE_PID" 2>/dev/null || true' EXIT` (a `trap` is required, not
+  just end-of-script code, because `set -e` failures jump straight to the
+  `EXIT` trap and skip any code after them).
+- User then asked "Where are the logs saved, just give dir?" — answered:
+  `<repo-root>/logs/` (outside `code/`, matches `cfg.ROOT / "logs"`).
+- User then broadened the request significantly: "Please add all loss
+  plots and all metrics and also whichever code I run, please save each
+  and everything in a log file in dir logs (outside code)." Bash-level
+  `tee` only covers the 3 bash wrappers — it does nothing for a script run
+  directly via `python` or `torchrun` (the normal way to run any single
+  training/eval/report stage per `JOB_GUIDE.md`). Solved this at the
+  Python level instead so logging is automatic regardless of invocation
+  method.
+- Added `start_run_logging(script_name, args)` to `code/recap_utils.py`,
+  backed by a small `_Tee` class (writes to both the real
+  stdout/stderr *and* a log file). Only runs on the main process
+  (`is_main_process()` gate — correct even under `torchrun`, since
+  `accelerate`'s `PartialState`/the `RANK` env var are both already set by
+  torchrun before any script code runs, so this is safe to call at the very
+  top of `main()`, before any DDP/`Accelerator` setup happens later inside
+  `process_one()`). Builds a descriptive filename from a timestamp +
+  script name + (`lang`/`direction`/`experiment` if present on `args`),
+  e.g. `logs/2026-08-25_143012_recap_train_dpo_bhili_hi2tgt_recap_dpo.log`.
+  Verified functionally in isolation before rolling out (fake
+  `argparse.Namespace`, confirmed correct terminal passthrough + correct
+  log file content + correct filename).
+- Rolled out `recap_utils.start_run_logging(...)` to all **15** runnable
+  pipeline scripts, called right after `args = parser.parse_args()` in each
+  (or at the top of `main()` / the bare `__main__` block for the 3 scripts
+  that take no CLI args): `recap_split.py`, `recap_calibrate.py`,
+  `recap_score.py`, `recap_mine_pairs.py`, `recap_balance_pairs.py`,
+  `recap_train_dpo.py`, `recap_train_grpo.py`, `recap_train_ppo.py`,
+  `recap_infer.py`, `recap_evaluate.py`, `recap_report_tables.py`,
+  `recap_report_plots.py`, `recap_sample_for_human_eval.py`,
+  `recap_human_eval_analysis.py`, `recap_checks.py`. Since every training
+  script (`recap_train_dpo/grpo/ppo.py`) already had per-step JSONL
+  train/val curve logging from §2.22 (`train_log_path()`/`val_log_path()`,
+  written to `recap_dpo/…`/`recap_grpo/…`/`recap_ppo/…`) and
+  `recap_report_plots.py` already turns those into Figures 5/6/7 loss
+  plots, this new layer's job is specifically the full raw terminal
+  transcript — every print, every metric line, every stack trace — for
+  literally any script, captured into `logs/` with zero extra flags needed
+  at call time.
+- `recap_report_tables.py`, `recap_report_plots.py`, and `recap_checks.py`
+  needed `import recap_utils` added (they didn't previously import it) —
+  checked for circular-import risk first (`recap_utils.py` only imports
+  stdlib + `tqdm`, not `recap_checks`), confirmed clean.
+- Verified all 7 newly-touched files this round
+  (`recap_train_grpo.py`, `recap_train_dpo.py`, `recap_train_ppo.py`,
+  `recap_split.py`, `recap_report_plots.py`, `recap_report_tables.py`,
+  `recap_checks.py`) with `ast.parse` (syntax) and then a real
+  `importlib.import_module()` pass inside the actual `recap` conda env
+  (the bare system `python3` lacks `pandas`/`tqdm` — a real environment
+  distinction worth remembering for any future verification step in this
+  repo) — all 9 core modules imported cleanly with no errors.
+
 ---
 
 ## 3. Key files touched this session (for quick orientation)
@@ -776,18 +840,22 @@ originally done for GRPO/PPO before they were even smoke-tested.)*
 | File | What changed |
 |---|---|
 | `code/config.py` | `MAHA_DATA_2_ROOT` fixed (missing `dataset/` prefix); `LANGUAGES` narrowed to `["Bhili", "Mundari"]`; added `deltas_path()`; `SPLIT_RATIOS`/`DPOSettings.max_length`/`max_new_tokens`×3 changed per §2.19; added `train_log_path()`/`val_log_path()` (§2.22) |
-| `code/recap_utils.py` | new `append_jsonl()` helper for train/val curve logs (§2.22) |
-| `code/recap_train_dpo.py` | trl autograd monkeypatch (§2.5); fixed the DDP hang (§2.6); `save_total_limit=1` to stop unbounded checkpoint accumulation (§2.21); `on_log` hook + val-log persistence for curves (§2.22) |
-| `code/recap_train_grpo.py` | fixed the same-class DDP hang via `all_reduce` sync (§2.7); train/val curve logging (§2.22) |
-| `code/recap_train_ppo.py` | same `all_reduce` fix (§2.7); DDP-unwrap fix for `.generate()`/`.save_pretrained()` (§2.9); train/val curve logging with verified real trl stats keys (§2.22) |
-| `code/recap_infer.py` | `resolve_checkpoint()` now raises a clear error on a missing checkpoint instead of a confusing HF Hub error (§2.10) |
-| `code/recap_evaluate.py` | proper Koehn-style paired bootstrap with p-values, deltas persisted to `deltas_vs_sft.json`, missing-checkpoint `[Skip]` handling (§2.10, §2.15) |
-| `code/recap_report_tables.py` | new `table7_significance.csv`/`table8_significance.csv` builders (§2.15) |
-| `code/recap_report_plots.py` | new Figures 5/6/7 — DPO/GRPO/PPO train+val curves, one per (lang, direction, experiment) (§2.22) |
+| `code/recap_utils.py` | new `append_jsonl()` helper for train/val curve logs (§2.22); new `_Tee` class + `start_run_logging(script_name, args)` — auto-logs every script's full terminal output to `logs/` (§2.26) |
+| `code/recap_train_dpo.py` | trl autograd monkeypatch (§2.5); fixed the DDP hang (§2.6); `save_total_limit=1` to stop unbounded checkpoint accumulation (§2.21); `on_log` hook + val-log persistence for curves (§2.22); `start_run_logging()` call (§2.26) |
+| `code/recap_train_grpo.py` | fixed the same-class DDP hang via `all_reduce` sync (§2.7); train/val curve logging (§2.22); `start_run_logging()` call (§2.26) |
+| `code/recap_train_ppo.py` | same `all_reduce` fix (§2.7); DDP-unwrap fix for `.generate()`/`.save_pretrained()` (§2.9); train/val curve logging with verified real trl stats keys (§2.22); `start_run_logging()` call (§2.26) |
+| `code/recap_infer.py` | `resolve_checkpoint()` now raises a clear error on a missing checkpoint instead of a confusing HF Hub error (§2.10); `start_run_logging()` call (§2.26) |
+| `code/recap_evaluate.py` | proper Koehn-style paired bootstrap with p-values, deltas persisted to `deltas_vs_sft.json`, missing-checkpoint `[Skip]` handling (§2.10, §2.15); `start_run_logging()` call (§2.26) |
+| `code/recap_report_tables.py` | new `table7_significance.csv`/`table8_significance.csv` builders (§2.15); `import recap_utils` + `start_run_logging()` call at top of `main()` (§2.26) |
+| `code/recap_report_plots.py` | new Figures 5/6/7 — DPO/GRPO/PPO train+val curves, one per (lang, direction, experiment) (§2.22); `import recap_utils` + `start_run_logging()` call at top of `main()` (§2.26) |
 | `code/recap_reward.py` | `_is_valid()` now catches NaN candidates, not just `None` (§2.20) |
+| `code/recap_checks.py` | `import recap_utils` + `start_run_logging()` call in the bare `__main__` block (§2.26) |
+| `code/recap_split.py` | `import recap_utils` + `start_run_logging()` call (§2.26) |
+| `code/recap_score.py`, `recap_mine_pairs.py`, `recap_balance_pairs.py`, `recap_calibrate.py`, `recap_sample_for_human_eval.py`, `recap_human_eval_analysis.py` | each got `start_run_logging()` call after argparse (§2.26) |
 | `code/JOB_GUIDE.md` | real cluster paths (§2.3); significance-testing instructions + migration note (§2.15); full rewrite — de-Gondi'd, job counts fixed, reordered by priority/language, renumbered §0-§12 (§2.25) |
-| `code/smoke_test_bhili.bash` | new — full-pipeline smoke test, both directions, one command (§2.25) |
-| `code/smoke_test_mundari.bash` | new — same, for Mundari (§2.25) |
+| `code/smoke_test_bhili.bash` | new — full-pipeline smoke test, both directions, one command (§2.25); auto-logging via `exec`/`tee`/`trap` (§2.26) |
+| `code/smoke_test_mundari.bash` | new — same, for Mundari (§2.25); auto-logging via `exec`/`tee`/`trap` (§2.26) |
+| `code/run_all_experiments.sh` | auto-logging via `exec`/`tee`/`trap` added, command ordering/content otherwise untouched (§2.26) |
 | `requirements.txt` | new — pinned package versions + why (§2.4) |
 | `RESOLVE_ERRORS.md` | new — plain-language running error log, 10 entries so far (§2.8, §2.20, §2.21, append-only, keep going) |
 | `dataset_statistics.csv` | new — full dataset statistical analysis (§2.18); repetition-rate table from §2.20 not yet folded in |

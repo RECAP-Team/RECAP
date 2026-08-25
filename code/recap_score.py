@@ -19,6 +19,7 @@ import pandas as pd
 from tqdm import tqdm
 
 import config as cfg
+import recap_utils
 from recap_reward import RewardEngine
 
 TQDM_MIN_ITEMS = 200  # match recap_reward.py -- don't bother for small smoke-test runs
@@ -82,6 +83,7 @@ def main() -> None:
     parser.add_argument("--lang", choices=cfg.LANGUAGES, default=None)
     parser.add_argument("--direction", choices=cfg.DIRECTIONS, default=None)
     args = parser.parse_args()
+    recap_utils.start_run_logging("recap_score", args)
     if bool(args.lang) != bool(args.direction):
         parser.error("--lang and --direction must be given together")
 

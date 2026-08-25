@@ -20,6 +20,7 @@ import argparse
 import pandas as pd
 
 import config as cfg
+import recap_utils
 
 
 def sample_for_human_eval(experiment: str, n: int, seed: int = cfg.SEED) -> None:
@@ -67,6 +68,7 @@ def main() -> None:
     parser.add_argument("--n", type=int, default=500)
     parser.add_argument("--seed", type=int, default=cfg.SEED)
     args = parser.parse_args()
+    recap_utils.start_run_logging("recap_sample_for_human_eval", args)
     sample_for_human_eval(args.experiment, args.n, args.seed)
 
 

@@ -188,6 +188,72 @@ def append_jsonl(path: Path, record: dict[str, Any]) -> None:
         f.write(json.dumps(record, default=str) + "\n")
 
 
+class _Tee:
+    """Writes to multiple streams at once -- used by start_run_logging() so
+    a script's own stdout/stderr keep working normally in the terminal
+    while everything printed also lands in a log file."""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data):
+        for s in self.streams:
+            s.write(data)
+            s.flush()
+
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+
+    def isatty(self):
+        return any(getattr(s, "isatty", lambda: False)() for s in self.streams)
+
+
+def start_run_logging(script_name: str, args: Any = None) -> Path | None:
+    """Redirects this process's stdout/stderr so everything it prints also
+    gets saved to a timestamped file under logs/ (the RECAP repo root, a
+    sibling of code/ -- not inside it), on top of what still shows live in
+    the terminal. Python-level (not a shell wrapper) so this covers ANY way
+    the script gets invoked -- direct `python foo.py`, torchrun, or a bash
+    wrapper -- not just the three top-level entry-point scripts that
+    already had their own bash-level `tee` logging.
+
+    Call once, right after argparse parses --lang/--direction/--experiment
+    (if the script has them) so the log filename can include them --
+    matching the naming convention already used by
+    smoke_test_bhili.bash/smoke_test_mundari.bash/run_all_experiments.sh.
+
+    Gated to rank 0 under DDP: torchrun already interleaves every rank's
+    terminal output into one stream, so a second file writer per rank here
+    would just race on the same file rather than capture anything extra.
+    Returns the log path (main process) or None (every other rank, or if
+    logging couldn't be set up -- never raises, since a broken log
+    redirect should never take down a real pipeline run)."""
+    if not is_main_process():
+        return None
+    try:
+        import config as cfg
+
+        log_dir = cfg.ROOT / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        parts = [datetime.now().strftime("%Y-%m-%d_%H%M%S"), script_name]
+        for attr in ("lang", "direction", "experiment"):
+            value = getattr(args, attr, None) if args is not None else None
+            if value:
+                parts.append(str(value).lower())
+        log_path = log_dir / (("_".join(parts)) + ".log")
+
+        log_file = open(log_path, "a", encoding="utf-8")
+        sys.stdout = _Tee(sys.__stdout__, log_file)
+        sys.stderr = _Tee(sys.__stderr__, log_file)
+        print(f"Logging this run to {log_path}")
+        return log_path
+    except Exception as e:
+        print(f"[Warn] could not set up run logging, continuing without it: {e}")
+        return None
+
+
 def save_training_state_meta(path: Path, step: int, extra: dict | None = None) -> None:
     """Small resume-metadata JSON (loop step counter, best-so-far composite)
     for hand-rolled training loops (GRPO, classic-API PPO) that don't get HF

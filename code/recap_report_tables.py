@@ -15,6 +15,7 @@ import json
 import pandas as pd
 
 import config as cfg
+import recap_utils
 
 
 def _lang_prefix(columns: list[str]) -> str:
@@ -169,6 +170,7 @@ def build_table_9(seed: int = cfg.SEED) -> pd.DataFrame:
 
 
 def main() -> None:
+    recap_utils.start_run_logging("recap_report_tables")
     out_dir = cfg.REPORT_ROOT / "tables"
     out_dir.mkdir(parents=True, exist_ok=True)
 

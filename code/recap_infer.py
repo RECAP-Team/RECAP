@@ -93,6 +93,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", default=None, help="Explicit checkpoint path override")
     parser.add_argument("--experiment", choices=list(cfg.EXPERIMENTS.keys()), default=None)
     args = parser.parse_args()
+    recap_utils.start_run_logging("recap_infer", args)
 
     if bool(args.source) == bool(args.input_csv):
         parser.error("Pass exactly one of --source or --input_csv")
