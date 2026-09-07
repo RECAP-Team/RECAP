@@ -124,3 +124,11 @@ recap_pairs/
 recap_dpo/
 recap_grpo/
 recap_ppo/
+
+# delete_inference/ -- ad-hoc Marathi inference. Keep the .py scripts
+# tracked, ignore everything they generate (per-direction prediction CSVs
+# and the BLEU/chrF++ scores CSV).
+delete_inference/marathi_infer_predictions_*.csv
+delete_inference/marathi_infer_scores.csv
+delete_inference/marathi_infer_nllb_predictions_*.csv
+delete_inference/marathi_infer_nllb_scores.csv
