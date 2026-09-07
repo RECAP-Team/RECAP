@@ -14,6 +14,7 @@ qwen-*-finetuned/
 llama-*-finetuned/
 splits_*/
 all_languages_scores.csv
+all_marathi_scores.csv
 test_predictions_*.csv
 final_scores_*.txt
 
