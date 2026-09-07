@@ -381,11 +381,17 @@ def run_direction(direction, train_df, val_df, test_df, epochs, hi_col, mr_col):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--direction", choices=DIRECTIONS, default=None,
+                        help="Run just this direction (default: whatever config.json lists)")
+    args = parser.parse_args()
+
     config_path = Path(__file__).resolve().parent / "config.json"
     with open(config_path, "r", encoding="utf-8") as f:
         run_cfg = json.load(f)
 
-    directions = run_cfg.get("direction", DIRECTIONS)
+    directions = [args.direction] if args.direction else run_cfg.get("direction", DIRECTIONS)
     if isinstance(directions, str):
         directions = [directions]
     train_csv = run_cfg["train_csv"]
