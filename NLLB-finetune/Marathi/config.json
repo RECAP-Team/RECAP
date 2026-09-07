@@ -1,0 +1,9 @@
+{
+  "direction": ["hi2mr", "mr2hi"],
+  "epochs": 10,
+  "train_csv": "/home/scai/msr/aiy257590/flash/Interpretability-low-resource/cross_Attn_faithfulness/data_curation/Marathi/train.csv",
+  "test_csv": "/home/scai/msr/aiy257590/flash/Interpretability-low-resource/cross_Attn_faithfulness/data_curation/Marathi/test.csv",
+  "val_ratio": 0.025,
+  "hi_col": "hindi",
+  "mr_col": "marathi"
+}
