@@ -133,3 +133,6 @@ delete_inference/marathi_infer_predictions_*.csv
 delete_inference/marathi_infer_scores.csv
 delete_inference/marathi_infer_nllb_predictions_*.csv
 delete_inference/marathi_infer_nllb_scores.csv
+
+# corpus_analysis.py output
+delete_inference/corpus_analysis_out/
