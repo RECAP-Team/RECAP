@@ -80,9 +80,9 @@ HERE = Path(__file__).resolve().parent
 DATASETS = {
     "bhili": {
         "kind": "explicit_splits",
-        "train": "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/bhilli/train.csv",
-        "val":   "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/bhilli/val.csv",
-        "test":  "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/bhilli/test.csv",
+        "train": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/train.csv",
+        "val":   "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/val.csv",
+        "test":  "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/test.csv",
         "hi_col": "Hindi", "tgt_col": "Bhili", "tgt_name": "Bhili",
         "nllb_tgt_lang": None,          # Bhili not in base NLLB-200
     },
