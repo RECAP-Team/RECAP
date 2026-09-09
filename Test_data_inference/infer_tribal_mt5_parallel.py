@@ -45,7 +45,7 @@ DEFAULT_REPO_ROOT = "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP"
 
 MAX_LENGTH = 128
 BATCH_SIZE = 32
-NUM_BEAMS  = 4
+NUM_BEAMS  = 2
 
 # CSV column name == prefix name == repo folder name; checkpoint slug is the
 # lowercase form: mt5_finetune/<Lang>/mt5-<lang>-hi2tgt-finetuned
