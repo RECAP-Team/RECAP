@@ -136,3 +136,8 @@ delete_inference/marathi_infer_nllb_scores.csv
 
 # corpus_analysis.py output
 delete_inference/corpus_analysis_out/
+
+# Test_data_inference/ -- keep the .py script; ignore generated CSVs + workdir
+Test_data_inference/_infer_work/
+Test_data_inference/test_with_ids.csv
+Test_data_inference/test_with_predictions.csv
