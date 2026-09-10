@@ -152,7 +152,7 @@ def main():
     ap.add_argument("--id_col", default="id")
     ap.add_argument("--hi_col", default="hindi")
     ap.add_argument("--mr_col", default="marathi")
-    ap.add_argument("--num_beams", type=int, default=4)
+    ap.add_argument("--num_beams", type=int, default=3)
     ap.add_argument("--max_length", type=int, default=128)
     ap.add_argument("--batch_size", type=int, default=32)
     for k, v in DEFAULT_CKPTS.items():
