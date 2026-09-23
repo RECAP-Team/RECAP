@@ -1,0 +1,10 @@
+{
+  "base_model": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/IndicTrans2-indic-indic-1B",
+  "data_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets",
+  "output_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/indictrans2_finetune",
+  "languages": {
+    "Bhili":   {"dir_name": "bhilli",  "csv_col": "Bhili",   "lang_code": "bhb_Deva", "needs_new_tag": true},
+    "Mundari": {"dir_name": "Mundari", "csv_col": "Mundari", "lang_code": "unr_Deva", "needs_new_tag": false},
+    "Gondi":   {"dir_name": "Gondi",   "csv_col": "Gondi",   "lang_code": "gon_Deva", "needs_new_tag": false}
+  }
+}

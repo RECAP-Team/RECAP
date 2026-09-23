@@ -142,3 +142,9 @@ Test_data_inference/_infer_work/
 Test_data_inference/test_with_ids.csv
 Test_data_inference/test_with_predictions.csv
 Test_data_inference/*_scored.csv
+
+# indictrans2_finetune/ -- keep finetune_indictrans2.py + config.json,
+# ignore the LoRA adapter checkpoints (+ HF Trainer logging/run dirs) each
+# job writes under <Lang>/indictrans2-<lang>-<direction>-lora/
+indictrans2_finetune/*/indictrans2-*-lora/
+indictrans2_finetune/*/*/runs/
