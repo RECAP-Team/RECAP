@@ -67,6 +67,15 @@ Run (auto-detects GPU count):
     python finetune_indictrans2.py
     python finetune_indictrans2.py --langs Bhili --directions hi2tgt
 
+Smoke test first (same job list, same code paths, ~300 train / ~60 val
+rows per job, ~10 steps -- finishes in minutes, writes to a
+"-smoketest" suffixed output dir that never collides with a real run):
+    python finetune_indictrans2.py --langs Bhili,Mundari,Gondi,Marathi \
+        --directions hi2tgt,tgt2hi --smoke_test
+Check every job printed "... done -> .../indictrans2-<lang>-<direction>
+-lora-smoketest" with no traceback, then rerun the same command without
+--smoke_test (or qsub run_indictrans2_finetune.pbs) for the real run.
+
 Config (indictrans2_finetune/config.json, same directory) -- each language
 entry is fully self-contained (own CSV paths), since Marathi's data lives
 in a different directory tree than the other three. See config.json.
@@ -235,8 +244,9 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
 
     cfg = lang_cfg[lang]
     lang_code = cfg["lang_code"]
-    output_dir = str(Path(args.output_root) / lang / f"indictrans2-{lang.lower()}-{direction}-lora")
-    print(f"\n===== {tag} =====")
+    suffix = "-smoketest" if args.smoke_test else ""
+    output_dir = str(Path(args.output_root) / lang / f"indictrans2-{lang.lower()}-{direction}-lora{suffix}")
+    print(f"\n===== {tag}{' [SMOKE TEST]' if args.smoke_test else ''} =====")
     print(f"  base model: {args.base_model}")
     print(f"  output    : {output_dir}")
 
@@ -268,6 +278,9 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
 
     print(f"{tag} loading data ({cfg['train_csv']}) ...")
     train_hi, train_tgt, val_hi, val_tgt = load_train_val_lines(cfg)
+    if args.smoke_test:
+        train_hi, train_tgt = train_hi[:args.smoke_train_rows], train_tgt[:args.smoke_train_rows]
+        val_hi, val_tgt = val_hi[:args.smoke_val_rows], val_tgt[:args.smoke_val_rows]
     train_ds = make_dataset(train_hi, train_tgt, direction, lang_code, tokenizer, processor, args)
     eval_ds = make_dataset(val_hi, val_tgt, direction, lang_code, tokenizer, processor, args)
     print(f"{tag} train={len(train_ds)}  val={len(eval_ds)}")
@@ -297,16 +310,31 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
+    # Smoke test: same recipe, just fast -- a handful of steps with
+    # eval/save/logging tight enough to actually happen (so the
+    # eval -> checkpoint -> save_pretrained path all get exercised) instead
+    # of the real 1000-step intervals never being reached.
+    if args.smoke_test:
+        max_steps = args.smoke_max_steps
+        save_steps = eval_steps = min(5, max_steps)
+        warmup_steps = min(2, max_steps)
+        logging_steps = 1
+    else:
+        max_steps = args.max_steps
+        save_steps, eval_steps = args.save_steps, args.eval_steps
+        warmup_steps = args.warmup_steps
+        logging_steps = 100
+
     training_args = Seq2SeqTrainingArguments(
         output_dir=output_dir,
         do_train=True, do_eval=True,
         fp16=args.fp16,
         logging_strategy="steps", evaluation_strategy="steps", save_strategy="steps",
-        logging_steps=100,
+        logging_steps=logging_steps,
         save_total_limit=1,
         predict_with_generate=True,
         load_best_model_at_end=True,
-        max_steps=args.max_steps,
+        max_steps=max_steps,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum_steps,
@@ -317,10 +345,10 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
         max_grad_norm=args.max_grad_norm,
         optim=args.optimizer,
         lr_scheduler_type=args.lr_scheduler,
-        warmup_steps=args.warmup_steps,
+        warmup_steps=warmup_steps,
         learning_rate=args.learning_rate,
-        save_steps=args.save_steps,
-        eval_steps=args.eval_steps,
+        save_steps=save_steps,
+        eval_steps=eval_steps,
         dataloader_num_workers=args.num_workers,
         metric_for_best_model=args.metric_for_best_model,
         greater_is_better=True,
@@ -409,6 +437,16 @@ def main():
     # that among them instead of requesting 16 each.
     ap.add_argument("--num_workers", type=int, default=4)
     ap.add_argument("--num_proc", type=int, default=4)
+    # Smoke test: same job list, same code paths (incl. add_bhili_tag and
+    # the GPU pool), just a tiny slice of data and a handful of steps so it
+    # finishes in minutes instead of hours. Writes to
+    # <output_root>/<Lang>/indictrans2-<lang>-<direction>-lora-smoketest/
+    # -- a separate dir from the real run, so it can never be mistaken for
+    # (or block resume of) a real job.
+    ap.add_argument("--smoke_test", action="store_true")
+    ap.add_argument("--smoke_train_rows", type=int, default=300)
+    ap.add_argument("--smoke_val_rows", type=int, default=60)
+    ap.add_argument("--smoke_max_steps", type=int, default=10)
     args = ap.parse_args()
 
     with open(args.config) as f:
