@@ -25,8 +25,10 @@ https://github.com/AI4Bharat/IndicTrans2:
     the model was pretrained on)
   - IndicDataCollator (also from IndicTransToolkit)
   - Hyperparameters taken verbatim from train_lora.sh's recommended
-    defaults: lr=2e-4, batch_size=32, grad_accum_steps=4 (effective batch
-    128), warmup_steps=4000, adamw_torch, inverse_sqrt schedule,
+    defaults: lr=2e-4, warmup_steps=4000, adamw_torch, inverse_sqrt schedule,
+    batch_size=8/grad_accum_steps=16 (effective batch 128, same as
+    AI4Bharat's 32/4 -- per-device batch lowered for GPU-memory headroom on
+    shared/contended GPUs; override --batch_size/--grad_accum_steps to change),
     adam_beta=(0.9, 0.98), max_grad_norm=1.0, weight_decay=0.01,
     LoRA r=16/alpha=32/dropout=0.1 on q_proj,k_proj, fp16, early stopping
     on eval_BLEU (patience=10), generation beam=5/max_length=256.
@@ -445,8 +447,13 @@ def main():
     # from huggingface_interface/train_lora.sh (verified against the repo,
     # not guessed).
     ap.add_argument("--learning_rate", type=float, default=2e-4)
-    ap.add_argument("--batch_size", type=int, default=32)
-    ap.add_argument("--grad_accum_steps", type=int, default=4)
+    # AI4Bharat's own default is batch_size=32/grad_accum_steps=4 (effective
+    # 128). Lowered per-device batch here (server2 hit real GPU contention
+    # from another process, not a bug in this script) while keeping the
+    # same effective batch size by raising grad_accum_steps proportionally
+    # -- override either independently with these flags if needed.
+    ap.add_argument("--batch_size", type=int, default=8)
+    ap.add_argument("--grad_accum_steps", type=int, default=16)
     ap.add_argument("--max_steps", type=int, default=1_000_000)  # unbounded; early stopping decides
     ap.add_argument("--warmup_steps", type=int, default=4000)
     ap.add_argument("--max_grad_norm", type=float, default=1.0)
