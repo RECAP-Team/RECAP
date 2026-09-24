@@ -1,0 +1,37 @@
+#!/bin/sh
+#PBS -N indictrans2_ft
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=16:ngpus=4
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/indictrans2_finetune
+
+source ~/.bashrc
+conda activate mt5
+
+# NOT torch.distributed.run: this script does its own multi-GPU
+# orchestration internally -- it auto-detects the GPU count (4 here) and
+# runs 4 INDEPENDENT LoRA finetuning jobs in parallel (one per GPU), not
+# one job data-parallelised across 4 GPUs. With 4 languages x 2 directions
+# = 8 jobs and 4 GPUs, the pool runs 4 at a time and pulls the remaining 4
+# as workers free up.
+#
+# ncpus=16 (not 1, unlike a single torchrun job): up to 4 finetuning
+# processes run concurrently here, each wanting its own
+# --num_workers/--num_proc dataloader workers -- 1 CPU would starve them.
+#
+# Resumable: if this job dies (walltime, preemption, crash) before all 8
+# jobs finish, just resubmit this exact same script -- finetune_indictrans2.py
+# skips any (language, direction) that already has a finished adapter, and
+# resumes any that got partway through from its last saved checkpoint.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python finetune_indictrans2.py \
+    --langs Bhili,Mundari,Gondi,Marathi \
+    --directions hi2tgt,tgt2hi

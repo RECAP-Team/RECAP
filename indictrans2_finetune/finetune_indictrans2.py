@@ -1,8 +1,17 @@
 """
 LoRA-finetune ai4bharat/indictrans2-indic-indic-1B for Hindi<->{Bhili,Mundari,
-Gondi}, both directions, auto-detecting GPUs and running one job per GPU in
-parallel (a fixed-size worker pool pulls from a job queue -- works whether
-you request exactly as many GPUs as jobs, fewer, or more).
+Gondi,Marathi}, both directions (8 jobs total), auto-detecting GPUs and
+running one job per GPU in parallel (a fixed-size worker pool pulls from a
+job queue -- works whether you request exactly as many GPUs as jobs, fewer,
+or more).
+
+Resumable: if a job is killed partway (walltime, preemption, crash), rerun
+the exact same command -- run_job() checks for a finished adapter first
+(skips outright if found) and otherwise for the latest HF Trainer
+checkpoint-N/ dir (save_total_limit=1 keeps exactly one, with full
+optimizer/scheduler/RNG state) and resumes training from there via
+trainer.train(resume_from_checkpoint=...). Nothing to pass on the CLI --
+this is automatic per job.
 
 This follows AI4Bharat's own official HF finetuning recipe as closely as
 possible, verified directly from their source (not reconstructed from
@@ -48,26 +57,22 @@ tgt_lang get prepended to the *source* sequence -- see
 IndicTransTokenizer._src_tokenize); the target vocab carries no language
 tags at all, so no target-side vocab changes are ever needed.
 
-Data: read directly from the same train/val/test CSVs the mt5/nllb tribal
-finetunes use (English,Hindi,<Lang> or Unique_ID,Hindi,<Lang>,English --
-only Hindi/<Lang> are read), NOT AI4Bharat's one-sentence-per-line file
-layout.
+Data: read directly from CSVs, two shapes (see load_train_val_lines()):
+  - Bhili/Mundari/Gondi: RECAP/datasets/<Lang>/{train,val}.csv, columns
+    English,Hindi,<Lang> or Unique_ID,Hindi,<Lang>,English (only Hindi/
+    <Lang> are read) -- same files the mt5/nllb tribal finetunes use.
+  - Marathi: a single train.csv (columns hindi,marathi), no separate val
+    file -- split 97.5/2.5 in-script with the same seed as
+    mt5_finetune/Marathi/mt5_finetune.py.
+NOT AI4Bharat's own one-sentence-per-line file layout.
 
 Run (auto-detects GPU count):
     python finetune_indictrans2.py
     python finetune_indictrans2.py --langs Bhili --directions hi2tgt
 
-Config (indictrans2_finetune/config.json, same directory):
-    {
-      "base_model": ".../RECAP/Models/IndicTrans2-indic-indic-1B",
-      "data_root": ".../RECAP/datasets",
-      "output_root": ".../RECAP/indictrans2_finetune",
-      "languages": {
-        "Bhili":   {"dir_name": "bhilli",  "csv_col": "Bhili",   "lang_code": "bhb_Deva", "needs_new_tag": true},
-        "Mundari": {"dir_name": "Mundari", "csv_col": "Mundari", "lang_code": "unr_Deva", "needs_new_tag": false},
-        "Gondi":   {"dir_name": "Gondi",   "csv_col": "Gondi",   "lang_code": "gon_Deva", "needs_new_tag": false}
-      }
-    }
+Config (indictrans2_finetune/config.json, same directory) -- each language
+entry is fully self-contained (own CSV paths), since Marathi's data lives
+in a different directory tree than the other three. See config.json.
 """
 
 import os
@@ -99,6 +104,32 @@ def load_csv_pair(csv_path, hi_col, tgt_col):
         df[c] = df[c].astype(str).str.strip()
     df = df[(df[hi_col] != "") & (df[tgt_col] != "")]
     return df[hi_col].tolist(), df[tgt_col].tolist()
+
+
+def load_train_val_lines(cfg):
+    """Returns (train_hi, train_tgt, val_hi, val_tgt). Two shapes are
+    supported per language entry in config.json:
+      - presplit  : "train_csv" + "val_csv" given separately
+                    (Bhili/Mundari/Gondi -- RECAP/datasets/<Lang>/*.csv)
+      - auto_split: only "train_csv" given -> a shuffled val_ratio/val_seed
+                    split is carved out of it in-script (Marathi -- same
+                    97.5/2.5 split, same seed, as
+                    mt5_finetune/Marathi/mt5_finetune.py, so train/val
+                    membership is identical across every model family
+                    finetuned on this language)."""
+    hi_col, tgt_col = cfg["hi_col"], cfg["csv_col"]
+    if "val_csv" in cfg:
+        train_hi, train_tgt = load_csv_pair(cfg["train_csv"], hi_col, tgt_col)
+        val_hi, val_tgt = load_csv_pair(cfg["val_csv"], hi_col, tgt_col)
+        return train_hi, train_tgt, val_hi, val_tgt
+
+    hi, tgt = load_csv_pair(cfg["train_csv"], hi_col, tgt_col)
+    df = pd.DataFrame({"hi": hi, "tgt": tgt}).sample(
+        frac=1.0, random_state=cfg.get("val_seed", 42)).reset_index(drop=True)
+    n_val = int(round(len(df) * cfg.get("val_ratio", 0.025)))
+    val_df, train_df = df.iloc[:n_val], df.iloc[n_val:]
+    return (train_df["hi"].tolist(), train_df["tgt"].tolist(),
+            val_df["hi"].tolist(), val_df["tgt"].tolist())
 
 
 def build_jobs(languages_cfg, langs, directions):
@@ -148,13 +179,13 @@ def add_bhili_tag(model, tokenizer, new_tag="bhb_Deva", donor_tag=HIN_CODE):
 # =============================================================
 # 3. Preprocess + tokenize one (language, direction) dataset split,
 #    mirroring AI4Bharat's load_and_process_translation_dataset() /
-#    preprocess_fn() exactly, just sourced from our CSVs instead of
-#    one-sentence-per-line files.
+#    preprocess_fn() exactly, just sourced from CSV-loaded line lists
+#    (via load_train_val_lines() above) instead of one-sentence-per-line
+#    files.
 # =============================================================
-def build_dataset(csv_path, hi_col, tgt_col, direction, lang_code, tokenizer, processor, args, seed=42):
+def make_dataset(hi_lines, tgt_lines, direction, lang_code, tokenizer, processor, args, seed=42):
     from datasets import Dataset
 
-    hi_lines, tgt_lines = load_csv_pair(csv_path, hi_col, tgt_col)
     if direction == "hi2tgt":
         src_lines, label_lines = hi_lines, tgt_lines
         src_code, dst_code = HIN_CODE, lang_code
@@ -212,6 +243,7 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
         AutoModelForSeq2SeqLM, AutoTokenizer,
         Seq2SeqTrainer, Seq2SeqTrainingArguments, EarlyStoppingCallback,
     )
+    from transformers.trainer_utils import get_last_checkpoint
     from IndicTransToolkit import IndicProcessor, IndicDataCollator
     from peft import LoraConfig, get_peft_model
 
@@ -227,6 +259,21 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
     print(f"  base model: {args.base_model}")
     print(f"  output    : {output_dir}")
 
+    # Whole job already finished in a previous run (final adapter present)?
+    # Skip it outright -- resuming would just redo an already-complete job.
+    if Path(output_dir, "adapter_config.json").exists():
+        print(f"{tag} already finished (found {output_dir}/adapter_config.json) -- skipping")
+        return
+
+    # Otherwise: did a previous run of THIS job get partway through and die
+    # (walltime, preemption, crash)? get_last_checkpoint() finds the latest
+    # HF Trainer checkpoint-N/ dir (model + optimizer + scheduler + RNG
+    # state -- save_total_limit=1 below keeps exactly one, so this is
+    # always the most recent). Passed to trainer.train() further down.
+    resume_from_checkpoint = get_last_checkpoint(output_dir) if Path(output_dir).is_dir() else None
+    if resume_from_checkpoint:
+        print(f"{tag} resuming training from {resume_from_checkpoint}")
+
     print(f"{tag} loading base model + tokenizer ...")
     model = AutoModelForSeq2SeqLM.from_pretrained(
         args.base_model, trust_remote_code=True, attn_implementation="eager",
@@ -238,12 +285,10 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
     if cfg["needs_new_tag"]:
         add_bhili_tag(model, tokenizer, new_tag=lang_code, donor_tag=HIN_CODE)
 
-    data_dir = Path(args.data_root) / cfg["dir_name"]
-    print(f"{tag} loading data from {data_dir} ...")
-    train_ds = build_dataset(data_dir / "train.csv", "Hindi", cfg["csv_col"],
-                             direction, lang_code, tokenizer, processor, args)
-    eval_ds = build_dataset(data_dir / "val.csv", "Hindi", cfg["csv_col"],
-                            direction, lang_code, tokenizer, processor, args)
+    print(f"{tag} loading data ({cfg['train_csv']}) ...")
+    train_hi, train_tgt, val_hi, val_tgt = load_train_val_lines(cfg)
+    train_ds = make_dataset(train_hi, train_tgt, direction, lang_code, tokenizer, processor, args)
+    eval_ds = make_dataset(val_hi, val_tgt, direction, lang_code, tokenizer, processor, args)
     print(f"{tag} train={len(train_ds)}  val={len(eval_ds)}")
 
     data_collator = IndicDataCollator(
@@ -315,9 +360,10 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
 
     print(f"{tag} training ...")
     try:
-        trainer.train()
+        trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     except KeyboardInterrupt:
-        print(f"{tag} interrupted")
+        print(f"{tag} interrupted -- a checkpoint-N/ dir should still be on "
+              f"disk under {output_dir} for the next run to resume from")
 
     model.save_pretrained(output_dir)           # LoRA adapter (+ modules_to_save, if any)
     tokenizer.save_pretrained(output_dir)        # needed too when a new tag was added
