@@ -18,9 +18,9 @@
       "val_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Gondi/val.csv"
     },
     "Marathi": {
-      "hi_col": "hindi", "csv_col": "marathi", "lang_code": "mar_Deva", "needs_new_tag": false,
-      "train_csv": "/home/scai/msr/aiy257590/flash/Interpretability-low-resource/cross_Attn_faithfulness/data_curation/Marathi/train.csv",
-      "val_ratio": 0.025, "val_seed": 42
+      "hi_col": "Hindi", "csv_col": "Marathi", "lang_code": "mar_Deva", "needs_new_tag": false,
+      "train_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Marathi/train.csv",
+      "val_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Marathi/val.csv"
     }
   }
 }

@@ -57,14 +57,11 @@ tgt_lang get prepended to the *source* sequence -- see
 IndicTransTokenizer._src_tokenize); the target vocab carries no language
 tags at all, so no target-side vocab changes are ever needed.
 
-Data: read directly from CSVs, two shapes (see load_train_val_lines()):
-  - Bhili/Mundari/Gondi: RECAP/datasets/<Lang>/{train,val}.csv, columns
-    English,Hindi,<Lang> or Unique_ID,Hindi,<Lang>,English (only Hindi/
-    <Lang> are read) -- same files the mt5/nllb tribal finetunes use.
-  - Marathi: a single train.csv (columns hindi,marathi), no separate val
-    file -- split 97.5/2.5 in-script with the same seed as
-    mt5_finetune/Marathi/mt5_finetune.py.
-NOT AI4Bharat's own one-sentence-per-line file layout.
+Data: read directly from RECAP/datasets/<Lang>/{train,val}.csv for all four
+languages (see load_train_val_lines()) -- Bhili/Mundari/Gondi have columns
+English,Hindi,<Lang> or Unique_ID,Hindi,<Lang>,English; Marathi has
+unique_id,Hindi,Marathi. Only Hindi/<Lang> are read in every case. NOT
+AI4Bharat's own one-sentence-per-line file layout.
 
 Run (auto-detects GPU count):
     python finetune_indictrans2.py
@@ -107,29 +104,13 @@ def load_csv_pair(csv_path, hi_col, tgt_col):
 
 
 def load_train_val_lines(cfg):
-    """Returns (train_hi, train_tgt, val_hi, val_tgt). Two shapes are
-    supported per language entry in config.json:
-      - presplit  : "train_csv" + "val_csv" given separately
-                    (Bhili/Mundari/Gondi -- RECAP/datasets/<Lang>/*.csv)
-      - auto_split: only "train_csv" given -> a shuffled val_ratio/val_seed
-                    split is carved out of it in-script (Marathi -- same
-                    97.5/2.5 split, same seed, as
-                    mt5_finetune/Marathi/mt5_finetune.py, so train/val
-                    membership is identical across every model family
-                    finetuned on this language)."""
+    """Returns (train_hi, train_tgt, val_hi, val_tgt) from each language's
+    presplit "train_csv" + "val_csv" (RECAP/datasets/<Lang>/*.csv for all
+    four languages, incl. Marathi now that it's laid out the same way)."""
     hi_col, tgt_col = cfg["hi_col"], cfg["csv_col"]
-    if "val_csv" in cfg:
-        train_hi, train_tgt = load_csv_pair(cfg["train_csv"], hi_col, tgt_col)
-        val_hi, val_tgt = load_csv_pair(cfg["val_csv"], hi_col, tgt_col)
-        return train_hi, train_tgt, val_hi, val_tgt
-
-    hi, tgt = load_csv_pair(cfg["train_csv"], hi_col, tgt_col)
-    df = pd.DataFrame({"hi": hi, "tgt": tgt}).sample(
-        frac=1.0, random_state=cfg.get("val_seed", 42)).reset_index(drop=True)
-    n_val = int(round(len(df) * cfg.get("val_ratio", 0.025)))
-    val_df, train_df = df.iloc[:n_val], df.iloc[n_val:]
-    return (train_df["hi"].tolist(), train_df["tgt"].tolist(),
-            val_df["hi"].tolist(), val_df["tgt"].tolist())
+    train_hi, train_tgt = load_csv_pair(cfg["train_csv"], hi_col, tgt_col)
+    val_hi, val_tgt = load_csv_pair(cfg["val_csv"], hi_col, tgt_col)
+    return train_hi, train_tgt, val_hi, val_tgt
 
 
 def build_jobs(languages_cfg, langs, directions):
