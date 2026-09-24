@@ -265,10 +265,14 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
     from IndicTransToolkit import IndicProcessor, IndicDataCollator
     from peft import LoraConfig, get_peft_model
 
+    # CUDA_VISIBLE_DEVICES was set to just this worker's physical GPU in
+    # _pool_init(), so exactly one device is visible here and it's always
+    # index 0 from this process's point of view -- gpu_id (the real
+    # physical GPU number) is kept only for logging below.
+    device_tag = "cuda:0" if torch.cuda.is_available() else "cpu"
     if torch.cuda.is_available():
-        torch.cuda.set_device(gpu_id)
-    device_tag = f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu"
-    tag = f"[{lang}/{direction} {device_tag}]"
+        torch.cuda.set_device(0)
+    tag = f"[{lang}/{direction} physical-gpu{gpu_id}]"
 
     cfg = lang_cfg[lang]
     lang_code = cfg["lang_code"]
@@ -428,6 +432,17 @@ _worker_gpu_id = None
 def _pool_init(gpu_queue):
     global _worker_gpu_id
     _worker_gpu_id = gpu_queue.get()
+    # Restrict this worker process to exactly one physical GPU -- must be
+    # done here, before torch is ever imported in this process (run_job()
+    # imports it lazily), and via CUDA_VISIBLE_DEVICES rather than just
+    # torch.cuda.set_device() later. set_device() only changes the default
+    # device; it doesn't stop transformers/accelerate from seeing every
+    # GPU and spreading a single job's compute across all of them, which
+    # is exactly what happened without this -- each worker ended up using
+    # both physical GPUs instead of just its own, doubling memory/compute
+    # contention. With this restriction the assigned GPU is always index 0
+    # from this process's point of view (see run_job()).
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(_worker_gpu_id)
 
 
 def _pool_run(job_args):
