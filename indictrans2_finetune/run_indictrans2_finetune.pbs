@@ -33,5 +33,6 @@ conda activate mt5
 # skips any (language, direction) that already has a finished adapter, and
 # resumes any that got partway through from its last saved checkpoint.
 /home/scai/msr/aiy257590/.conda/envs/mt5/bin/python finetune_indictrans2.py \
+    --server pragya \
     --langs Bhili,Mundari,Gondi,Marathi \
     --directions hi2tgt,tgt2hi

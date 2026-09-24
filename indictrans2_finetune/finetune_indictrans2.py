@@ -57,14 +57,23 @@ tgt_lang get prepended to the *source* sequence -- see
 IndicTransTokenizer._src_tokenize); the target vocab carries no language
 tags at all, so no target-side vocab changes are ever needed.
 
-Data: read directly from RECAP/datasets/<Lang>/{train,val}.csv for all four
+Data: read directly from <data_root>/<Lang>/{train,val}.csv for all four
 languages (see load_train_val_lines()) -- Bhili/Mundari/Gondi have columns
 English,Hindi,<Lang> or Unique_ID,Hindi,<Lang>,English; Marathi has
 unique_id,Hindi,Marathi. Only Hindi/<Lang> are read in every case. NOT
 AI4Bharat's own one-sentence-per-line file layout.
 
+Multi-server: config.json has a top-level "servers": {name: {base_model,
+data_root, output_root}} map plus one shared "languages" map (dir_name/
+hi_col/csv_col/lang_code/needs_new_tag -- these don't change across
+servers, only where the data/model/output actually live does).
+--server picks which one (default "pragya"); resolve_lang_cfg() joins the
+shared per-language dir_name onto that server's data_root at runtime, so
+adding a third server is just one more entry under "servers".
+
 Run (auto-detects GPU count):
-    python finetune_indictrans2.py
+    python finetune_indictrans2.py                       # --server pragya (default)
+    python finetune_indictrans2.py --server server2
     python finetune_indictrans2.py --langs Bhili --directions hi2tgt
 
 Smoke test first (same job list, same code paths, ~300 train / ~60 val
@@ -120,6 +129,23 @@ def load_train_val_lines(cfg):
     train_hi, train_tgt = load_csv_pair(cfg["train_csv"], hi_col, tgt_col)
     val_hi, val_tgt = load_csv_pair(cfg["val_csv"], hi_col, tgt_col)
     return train_hi, train_tgt, val_hi, val_tgt
+
+
+def resolve_lang_cfg(languages, server_cfg):
+    """Merge the server-independent language shapes (config.json's top-level
+    "languages": dir_name/hi_col/csv_col/lang_code/needs_new_tag -- these
+    don't change across servers) with one server's data_root, producing the
+    same per-language cfg dict shape run_job()/load_train_val_lines()
+    already expect (train_csv/val_csv), just pointed at wherever this
+    server's copy of the data lives."""
+    data_root = server_cfg["data_root"]
+    resolved = {}
+    for lang, entry in languages.items():
+        e = dict(entry)
+        e["train_csv"] = str(Path(data_root) / e["dir_name"] / "train.csv")
+        e["val_csv"] = str(Path(data_root) / e["dir_name"] / "val.csv")
+        resolved[lang] = e
+    return resolved
 
 
 def build_jobs(languages_cfg, langs, directions):
@@ -402,6 +428,9 @@ def _pool_run(job_args):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(HERE / "config.json"))
+    ap.add_argument("--server", default="pragya",
+                    help="which config.json['servers'][...] entry to use for "
+                         "base_model/data_root/output_root paths")
     ap.add_argument("--langs", default="Bhili,Mundari,Gondi")
     ap.add_argument("--directions", default="hi2tgt,tgt2hi")
     # Hyperparameters -- defaults are AI4Bharat's own recommended values
@@ -451,10 +480,13 @@ def main():
 
     with open(args.config) as f:
         cfg = json.load(f)
-    args.base_model = cfg["base_model"]
-    args.data_root = cfg["data_root"]
-    args.output_root = cfg["output_root"]
-    lang_cfg = cfg["languages"]
+    assert args.server in cfg["servers"], \
+        f"unknown --server {args.server!r}, choices: {list(cfg['servers'])} (edit config.json to add more)"
+    server_cfg = cfg["servers"][args.server]
+    args.base_model = server_cfg["base_model"]
+    args.output_root = server_cfg["output_root"]
+    lang_cfg = resolve_lang_cfg(cfg["languages"], server_cfg)
+    print(f"[server] {args.server!r}: base_model={args.base_model}  data_root={server_cfg['data_root']}  output_root={args.output_root}")
 
     langs = [l.strip() for l in args.langs.split(",") if l.strip()]
     directions = [d.strip() for d in args.directions.split(",") if d.strip()]
