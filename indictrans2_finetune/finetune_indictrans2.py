@@ -375,7 +375,15 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
         learning_rate=args.learning_rate,
         save_steps=save_steps,
         eval_steps=eval_steps,
-        dataloader_num_workers=args.num_workers,
+        # Must stay 0, always: each job already runs inside its own
+        # multiprocessing.Pool worker (see the GPU pool below), and Pool
+        # workers are daemon processes -- Python forbids a daemon process
+        # from spawning children, so any dataloader_num_workers > 0 here
+        # crashes with "daemonic processes are not allowed to have
+        # children" the moment Trainer tries to spawn its own dataloader
+        # workers. Parallelism already comes from the outer GPU pool
+        # (multiple jobs at once), not from per-job dataloader workers.
+        dataloader_num_workers=0,
         metric_for_best_model=args.metric_for_best_model,
         greater_is_better=True,
         report_to="none",
@@ -461,10 +469,10 @@ def main():
     ap.add_argument("--max_length", type=int, default=256)
     ap.add_argument("--num_beams", type=int, default=5)
     ap.add_argument("--fp16", type=lambda s: s.lower() != "false", default=True)
-    # Per-parallel-job worker count. AI4Bharat's single-job recommendation
-    # is 16; with up to N jobs sharing one node's CPUs concurrently, divide
-    # that among them instead of requesting 16 each.
-    ap.add_argument("--num_workers", type=int, default=4)
+    # NOTE: no --num_workers flag -- dataloader_num_workers is hardcoded to
+    # 0 in run_job() and must stay that way (see the comment there): each
+    # job runs inside a daemon Pool worker, which cannot itself spawn the
+    # dataloader's worker subprocesses.
     ap.add_argument("--num_proc", type=int, default=4)
     # Smoke test: same job list, same code paths (incl. add_bhili_tag and
     # the GPU pool), just a tiny slice of data and a handful of steps so it
