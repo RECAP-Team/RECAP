@@ -1,0 +1,8 @@
+{
+  "language": "marathi",
+  "direction": ["hi2tgt", "tgt2hi"],
+  "epochs": 3,
+  "train_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Marathi/train.csv",
+  "val_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Marathi/val.csv",
+  "test_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Marathi/test.csv"
+}
