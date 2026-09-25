@@ -308,7 +308,16 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
     if args.smoke_test:
         max_steps, save_steps, eval_steps, warmup_steps, logging_steps = args.smoke_max_steps, 5, 5, 2, 1
     else:
-        max_steps, save_steps, eval_steps, warmup_steps, logging_steps = -1, args.save_steps, args.eval_steps, None, 100
+        max_steps, save_steps, eval_steps, logging_steps = -1, args.save_steps, args.eval_steps, 100
+        # warmup_ratio was removed from TrainingArguments in this
+        # transformers version (verified via inspect.signature -- only
+        # warmup_steps, an absolute count, remains) -- compute the
+        # equivalent step count ourselves: 3% of total training steps
+        # (steps/epoch * epochs), same warmup fraction qwen_finetune.py/
+        # llama_finetune.py use via warmup_ratio.
+        steps_per_epoch = max(1, -(-len(train_ds) // (args.batch_size * args.grad_accum_steps)))
+        total_steps = steps_per_epoch * args.epochs
+        warmup_steps = max(1, int(0.03 * total_steps))
 
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -321,8 +330,7 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
         optim="adamw_bnb_8bit",
         learning_rate=args.learning_rate,
         lr_scheduler_type="cosine",
-        warmup_ratio=0.03 if warmup_steps is None else 0.0,
-        warmup_steps=warmup_steps or 0,
+        warmup_steps=warmup_steps,
         eval_strategy="steps",
         eval_steps=eval_steps,
         save_strategy="steps",
