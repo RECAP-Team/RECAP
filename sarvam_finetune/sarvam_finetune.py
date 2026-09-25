@@ -350,7 +350,8 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
 
     trainer = Trainer(
         model=model, args=training_args, data_collator=data_collator,
-        train_dataset=train_ds, eval_dataset=val_ds, tokenizer=tokenizer,
+        train_dataset=train_ds, eval_dataset=val_ds,
+        processing_class=tokenizer,  # Trainer's tokenizer= kwarg was renamed processing_class= in transformers 5.x
     )
 
     print(f"{tag} training ...")
