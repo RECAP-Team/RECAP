@@ -148,3 +148,4 @@ Test_data_inference/*_scored.csv
 # job writes under <Lang>/indictrans2-<lang>-<direction>-lora/
 indictrans2_finetune/*/indictrans2-*-lora/
 indictrans2_finetune/*/*/runs/
+indictrans2_finetune/training_logs_summary.csv
