@@ -1,0 +1,38 @@
+#!/bin/sh
+#PBS -N qwen_marathi_2gpu
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=4:ngpus=2
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/qwen_finetune/Marathi
+
+source ~/.bashrc
+conda activate qwen_llama
+
+# One direction per GPU, running simultaneously -- NOT torchrun/DDP (Qwen
+# 0.5B fits easily on a single GPU, so each direction just trains as its own
+# independent plain-python process). PBS assigns this job's 2 GPUs via
+# CUDA_VISIBLE_DEVICES (comma-separated, may be plain indices or GPU UUIDs
+# depending on the node) -- split it and pin one entry to each process.
+IFS=',' read -ra GPUS <<< "$CUDA_VISIBLE_DEVICES"
+echo "Assigned GPUs: ${GPUS[@]}"
+
+PY=/home/scai/msr/aiy257590/.conda/envs/qwen_llama/bin/python
+
+CUDA_VISIBLE_DEVICES=${GPUS[0]} $PY qwen_finetune.py --direction hi2tgt > log_hi2tgt.log 2>&1 &
+PID1=$!
+CUDA_VISIBLE_DEVICES=${GPUS[1]} $PY qwen_finetune.py --direction tgt2hi > log_tgt2hi.log 2>&1 &
+PID2=$!
+
+wait $PID1
+echo "hi2tgt (PID $PID1) exited with status $?"
+wait $PID2
+echo "tgt2hi (PID $PID2) exited with status $?"

@@ -592,6 +592,11 @@ def parse_args():
                          help="Number of training rows to use in smoke-test mode.")
     parser.add_argument("--smoke_val_rows", type=int, default=60,
                          help="Number of val/test rows to use in smoke-test mode.")
+    parser.add_argument("--direction", choices=["hi2tgt", "tgt2hi"], default=None,
+                         help="Run only this direction instead of every direction "
+                              "in config.json. Lets two single-GPU processes (no "
+                              "torchrun/DDP) run hi2tgt and tgt2hi in parallel, one "
+                              "per GPU -- see run_qwen_marathi_2gpu.pbs.")
     # torchrun forwards the same argv to every rank, so this is safe under DDP.
     return parser.parse_args()
 
@@ -614,6 +619,9 @@ def main():
     # "direction" can be a single string or a list
     if isinstance(directions, str):
         directions = [directions]
+
+    if args.direction is not None:
+        directions = [args.direction]
 
     for direction in directions:
         run_direction(language, direction, train_csv, val_csv, test_csv, epochs,

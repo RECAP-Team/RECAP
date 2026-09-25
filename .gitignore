@@ -153,6 +153,10 @@ indictrans2_finetune/*/indictrans2-*-lora/
 indictrans2_finetune/*/*/runs/
 indictrans2_finetune/training_logs_summary.csv
 
+# qwen/llama 2-GPU per-direction PBS jobs -- per-process stdout/stderr logs
+qwen_finetune/*/log_*.log
+llama_finetune/*/log_*.log
+
 # sarvam_finetune/ -- keep sarvam_finetune.py + config.json, ignore the
 # full-finetune checkpoints + generated CSVs each job writes
 sarvam_finetune/*/sarvam-*-finetuned*/
