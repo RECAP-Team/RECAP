@@ -25,8 +25,8 @@ conda activate mt5
 # as workers free up.
 #
 # ncpus=16 (not 1, unlike a single torchrun job): up to 4 finetuning
-# processes run concurrently here, each wanting its own
-# --num_workers/--num_proc dataloader workers -- 1 CPU would starve them.
+# processes run concurrently here, each wanting its own --num_proc
+# (dataset.map()) workers -- 1 CPU would starve them.
 #
 # Resumable: if this job dies (walltime, preemption, crash) before all 8
 # jobs finish, just resubmit this exact same script -- finetune_indictrans2.py
