@@ -427,6 +427,18 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
     eval_save_steps = 5 if smoke_test else 900
     logging_steps = 1 if smoke_test else 1000
 
+    # transformers>=5.x removed TrainingArguments.warmup_ratio entirely
+    # (verified via inspect.signature on this env) -- compute an equivalent
+    # absolute warmup_steps (3% of total optimizer steps) instead. Effective
+    # global batch under DDP/DeepSpeed is per_device_bs * grad_accum * world_size.
+    world_size = dist.get_world_size() if dist.is_available() and dist.is_initialized() else 1
+    if already_trained:
+        warmup_steps = 0  # training is skipped entirely in this case
+    else:
+        steps_per_epoch = -(-len(tokenized_train) // (4 * 8 * world_size))  # ceil div
+        total_steps = steps_per_epoch * epochs
+        warmup_steps = max(1, int(0.03 * total_steps))
+
     # === TRAINING ARGS: full-parameter LLM SFT recipe (AdamW, small LR,
     #     short warmup, few epochs), plus DeepSpeed ZeRO-2 -- REQUIRED for
     #     full fine-tuning at 8B scale, since optimizer states + gradients +
@@ -439,7 +451,7 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
         gradient_accumulation_steps=8,
         learning_rate=2e-5,
         lr_scheduler_type="cosine",
-        warmup_ratio=0.03,
+        warmup_steps=warmup_steps,
         eval_strategy="steps",
         eval_steps=eval_save_steps,
         save_strategy="steps",
@@ -471,7 +483,7 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
         args=training_args,
         train_dataset=tokenized_train,
         eval_dataset=tokenized_val,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=data_collator,
     )
 
