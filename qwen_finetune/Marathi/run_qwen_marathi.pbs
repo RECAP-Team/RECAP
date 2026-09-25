@@ -1,0 +1,24 @@
+#!/bin/sh
+#PBS -N qwen_marathi
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=8:ngpus=4
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/qwen_finetune/Marathi
+
+source ~/.bashrc
+conda activate mt5
+
+# DDP across 4 GPUs (one process per GPU, torchrun-managed) -- both
+# directions (hi2tgt, tgt2hi) run sequentially within this one job, per
+# config.json. ncpus=8 = 2 dataloader workers x 4 ranks
+# (dataloader_num_workers=2 in the script).
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python -m torch.distributed.run --nproc_per_node=4 qwen_finetune.py
