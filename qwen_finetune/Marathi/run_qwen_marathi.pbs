@@ -15,10 +15,10 @@ cd $HOME
 cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/qwen_finetune/Marathi
 
 source ~/.bashrc
-conda activate mt5
+conda activate qwen_llama
 
 # DDP across 4 GPUs (one process per GPU, torchrun-managed) -- both
 # directions (hi2tgt, tgt2hi) run sequentially within this one job, per
 # config.json. ncpus=8 = 2 dataloader workers x 4 ranks
 # (dataloader_num_workers=2 in the script).
-/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python -m torch.distributed.run --nproc_per_node=4 qwen_finetune.py
+/home/scai/msr/aiy257590/.conda/envs/qwen_llama/bin/python -m torch.distributed.run --nproc_per_node=4 qwen_finetune.py
