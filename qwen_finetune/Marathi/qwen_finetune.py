@@ -81,7 +81,7 @@ import sacrebleu
 # =============================================================
 # CONFIG
 # =============================================================
-MODEL_NAME    = "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/Models/Qwen2.5-0.5B"
+MODEL_NAME    = "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/Qwen2.5-0.5B"
 MAX_LENGTH    = 256   # full prompt+response token budget (chat template adds overhead)
 MAX_NEW_TOKENS = 128  # generation cap for the response only
 SEED          = 42

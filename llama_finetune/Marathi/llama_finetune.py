@@ -93,7 +93,7 @@ import sacrebleu
 # =============================================================
 # CONFIG
 # =============================================================
-MODEL_NAME     = "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/Models/Llama-3.1-8B"
+MODEL_NAME     = "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/Llama-3.1-8B"
 DS_CONFIG      = str(Path(__file__).resolve().parent / "ds_config.json")
 MAX_LENGTH     = 256   # full prompt+response token budget (chat format adds overhead)
 MAX_NEW_TOKENS = 128   # generation cap for the response only
