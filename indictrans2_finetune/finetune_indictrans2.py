@@ -489,7 +489,7 @@ def main():
     ap.add_argument("--lora_dropout", type=float, default=0.1)
     ap.add_argument("--lora_target_modules", default="q_proj,k_proj")
     ap.add_argument("--max_length", type=int, default=256)
-    ap.add_argument("--num_beams", type=int, default=5)
+    ap.add_argument("--num_beams", type=int, default=2)
     ap.add_argument("--fp16", type=lambda s: s.lower() != "false", default=True)
     # NOTE: no --num_workers flag -- dataloader_num_workers is hardcoded to
     # 0 in run_job() and must stay that way (see the comment there): each

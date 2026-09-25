@@ -181,7 +181,7 @@ class CausalLMPaddingCollator:
 # 3. Generation-based scoring (real model.generate(), BLEU + chrF++)
 # =============================================================
 def generate_and_score(src_texts, ref_texts, tgt_name, model, tokenizer, device,
-                        max_new_tokens, num_beams=4, batch_size=16):
+                        max_new_tokens, num_beams=2, batch_size=16):
     import torch
     model.eval()
     tokenizer.padding_side = "left"  # required for correct batched causal-LM generation
@@ -418,7 +418,7 @@ def main():
     ap.add_argument("--eval_steps", type=int, default=900)
     ap.add_argument("--max_length", type=int, default=512)
     ap.add_argument("--max_new_tokens", type=int, default=256)
-    ap.add_argument("--num_beams", type=int, default=4)
+    ap.add_argument("--num_beams", type=int, default=2)
     ap.add_argument("--num_proc", type=int, default=4)
     ap.add_argument("--smoke_test", action="store_true")
     ap.add_argument("--smoke_train_rows", type=int, default=300)
