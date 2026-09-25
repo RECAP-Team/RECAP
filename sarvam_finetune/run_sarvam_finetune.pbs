@@ -1,0 +1,38 @@
+#!/bin/sh
+#PBS -N sarvam_ft
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=16:ngpus=4
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/sarvam_finetune
+
+source ~/.bashrc
+conda activate sarvam
+
+# NOT torchrun/DeepSpeed: this script auto-detects the GPU count (4 here)
+# and runs 4 INDEPENDENT full-finetune jobs in parallel (one per GPU), not
+# one job data-parallelised across 4 GPUs -- same orchestration as
+# indictrans2_finetune/finetune_indictrans2.py. With 4 languages x 2
+# directions = 8 jobs and 4 GPUs, the pool runs 4 at a time and pulls the
+# remaining 4 as workers free up.
+#
+# ncpus=16 (not 1): up to 4 finetuning processes run concurrently here,
+# each wanting its own --num_proc (dataset.map()) workers.
+#
+# Resumable: if this job dies (walltime, preemption, crash) before all 8
+# jobs finish, just resubmit this exact same script -- sarvam_finetune.py
+# skips any (language, direction) that already has a finished model, and
+# resumes any that got partway through from its last saved checkpoint
+# (safe here, unlike llama_finetune.py's documented DDP resume bug, since
+# each job is a single process alone on its own GPU, not DDP).
+/home/scai/msr/aiy257590/.conda/envs/sarvam/bin/python sarvam_finetune.py \
+    --langs Bhili,Mundari,Gondi,Marathi \
+    --directions hi2tgt,tgt2hi

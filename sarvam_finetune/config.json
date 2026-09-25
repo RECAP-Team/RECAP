@@ -1,0 +1,11 @@
+{
+  "base_model": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/Sarvam-Translate",
+  "data_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets",
+  "output_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/sarvam_finetune",
+  "languages": {
+    "Bhili":   {"dir_name": "bhilli",  "tgt_col": "Bhili"},
+    "Mundari": {"dir_name": "Mundari", "tgt_col": "Mundari"},
+    "Gondi":   {"dir_name": "Gondi",   "tgt_col": "Gondi"},
+    "Marathi": {"dir_name": "Marathi", "tgt_col": "Marathi"}
+  }
+}

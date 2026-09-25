@@ -149,3 +149,9 @@ Test_data_inference/*_scored.csv
 indictrans2_finetune/*/indictrans2-*-lora/
 indictrans2_finetune/*/*/runs/
 indictrans2_finetune/training_logs_summary.csv
+
+# sarvam_finetune/ -- keep sarvam_finetune.py + config.json, ignore the
+# full-finetune checkpoints + generated CSVs each job writes
+sarvam_finetune/*/sarvam-*-finetuned*/
+sarvam_finetune/*/test_predictions_*.csv
+sarvam_finetune/all_sarvam_scores*.csv
