@@ -1,0 +1,25 @@
+#!/bin/sh
+#PBS -N it2_batch2
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=16:ngpus=4
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/indictrans2_finetune
+
+source ~/.bashrc
+conda activate mt5
+
+# Batch 2/2 of the IndicTrans2 sweep: Gondi + Marathi (2 langs x 2
+# directions = 4 tasks on 4 GPUs). See run_indictrans2_batch1.pbs.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python finetune_indictrans2.py \
+    --server pragya \
+    --langs Gondi,Marathi \
+    --directions hi2tgt,tgt2hi

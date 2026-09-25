@@ -1,0 +1,28 @@
+#!/bin/sh
+#PBS -N sarvam_batch1
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=16:ngpus=4
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/sarvam_finetune
+
+source ~/.bashrc
+conda activate sarvam
+
+# Batch 1/2 of the Sarvam-Translate sweep: Bhili + Mundari (2 langs x 2
+# directions = 4 tasks on 4 GPUs, 1 task per GPU, zero idle GPU time).
+# Run alongside run_sarvam_batch2.pbs + both indictrans2_finetune batch
+# jobs (4 concurrent PBS jobs, 16 GPUs total) instead of one job covering
+# all 8 Sarvam directions alone -- see run_sarvam_finetune.pbs for the
+# single-job version and its full explanatory comments.
+/home/scai/msr/aiy257590/.conda/envs/sarvam/bin/python sarvam_finetune.py \
+    --langs Bhili,Mundari \
+    --directions hi2tgt,tgt2hi
