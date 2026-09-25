@@ -59,6 +59,7 @@ directory as this script):
 import os
 import json
 import csv
+import argparse
 import datetime
 from pathlib import Path
 
@@ -293,7 +294,7 @@ def generate_and_score(records, src_col, tgt_col, src_name, tgt_name,
 # 5. APPEND TO MASTER SCORES CSV
 # =============================================================
 def append_master_scores(language, direction, val_loss, val_bleu, val_chrf,
-                          test_bleu, test_chrf):
+                          test_bleu, test_chrf, scores_csv=SCORES_CSV):
     header = ["language", "direction", "val_loss",
               "val_bleu_beam", "val_chrf++_beam",
               "test_bleu_beam", "test_chrf++_beam"]
@@ -301,13 +302,13 @@ def append_master_scores(language, direction, val_loss, val_bleu, val_chrf,
            f"{val_bleu:.4f}", f"{val_chrf:.4f}",
            f"{test_bleu:.4f}", f"{test_chrf:.4f}"]
 
-    is_new = not SCORES_CSV.exists()
-    with open(SCORES_CSV, "a", newline="", encoding="utf-8") as f:
+    is_new = not scores_csv.exists()
+    with open(scores_csv, "a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         if is_new:
             w.writerow(header)
         w.writerow(row)
-    print(f"[Scores] Appended row '{language}/{direction}' to {SCORES_CSV}")
+    print(f"[Scores] Appended row '{language}/{direction}' to {scores_csv}")
 
 
 # =============================================================
@@ -329,7 +330,8 @@ def _has_final_model(output_dir):
     return has_config and has_weights
 
 
-def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
+def run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
+                   smoke_test=False, smoke_rows=300, smoke_val_rows=60):
     assert language in LANGUAGES, \
         f"Unknown language '{language}' in config.json, choices: {list(LANGUAGES.keys())}"
     assert direction in ["hi2tgt", "tgt2hi"], \
@@ -344,9 +346,14 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
     else:  # tgt2hi
         src_col, tgt_col, src_name, tgt_name = tgt_column, "Hindi", tgt_column, HIN_NAME
 
-    output_dir = f"./llama-{language}-{direction}-finetuned"
-    final_scores_path = f"final_scores_{language}_{direction}.txt"
-    print(f"\n========== Language: {language} | Direction: {direction} ==========")
+    # Smoke-test runs get their own dir/files/suffix so they can never
+    # collide with (or be mistaken for) a real completed run.
+    suffix = "-smoketest" if smoke_test else ""
+    output_dir = f"./llama-{language}-{direction}-finetuned{suffix}"
+    final_scores_path = f"final_scores_{language}_{direction}{suffix}.txt"
+    scores_csv = Path(f"./all_languages_scores{suffix}.csv")
+    print(f"\n========== Language: {language} | Direction: {direction} "
+          f"{'[SMOKE TEST] ' if smoke_test else ''}==========")
     print(f"  {src_col} -> {tgt_col}")
     print(f"[Output] {output_dir}")
 
@@ -361,6 +368,12 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
 
     # ---- Data ----
     train_df, val_df, test_df = load_splits(train_csv, val_csv, test_csv, tgt_column)
+    if smoke_test:
+        train_df = train_df.head(smoke_rows).reset_index(drop=True)
+        val_df   = val_df.head(smoke_val_rows).reset_index(drop=True)
+        test_df  = test_df.head(smoke_val_rows).reset_index(drop=True)
+        print(f"[Smoke] Truncated to train={len(train_df)} "
+              f"val={len(val_df)} test={len(test_df)}")
     train_set = Dataset.from_pandas(train_df, preserve_index=False)
     val_set   = Dataset.from_pandas(val_df,   preserve_index=False)
     test_set  = Dataset.from_pandas(test_df,  preserve_index=False)
@@ -407,6 +420,13 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
     # ---- Trainer ----
     data_collator = CausalLMPaddingCollator(pad_token_id=tokenizer.pad_token_id)
 
+    # In smoke-test mode there are only ~smoke_rows training rows, so the
+    # normal eval_steps/save_steps=900 would never be hit -- the eval/save/
+    # resume code path would never actually get exercised. Shrink both so a
+    # smoke run still walks through eval + checkpoint saving.
+    eval_save_steps = 5 if smoke_test else 900
+    logging_steps = 1 if smoke_test else 1000
+
     # === TRAINING ARGS: full-parameter LLM SFT recipe (AdamW, small LR,
     #     short warmup, few epochs), plus DeepSpeed ZeRO-2 -- REQUIRED for
     #     full fine-tuning at 8B scale, since optimizer states + gradients +
@@ -421,9 +441,9 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
         lr_scheduler_type="cosine",
         warmup_ratio=0.03,
         eval_strategy="steps",
-        eval_steps=900,
+        eval_steps=eval_save_steps,
         save_strategy="steps",
-        save_steps=900,
+        save_steps=eval_save_steps,
         save_total_limit=1,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
@@ -432,7 +452,7 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
         fp16=False,
         max_grad_norm=1.0,
         logging_dir=f"{output_dir}/logs",
-        logging_steps=1000,
+        logging_steps=logging_steps,
         dataloader_num_workers=2,
         report_to="none",
         seed=SEED,
@@ -506,7 +526,7 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
         print(f"TEST chrF++ = {test_chrf:.4f}")
 
         test_src_texts = [r[src_col] for r in dataset_dict["test"]]
-        preds_path = f"test_predictions_{language}_{direction}.csv"
+        preds_path = f"test_predictions_{language}_{direction}{suffix}.csv"
         pd.DataFrame({
             f"source_{src_col.lower()}":     test_src_texts,
             f"reference_{tgt_col.lower()}":  test_refs,
@@ -518,7 +538,7 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
         print(f"BLEU   : {test_bleu:.4f}")
         print(f"chrF++ : {test_chrf:.4f}")
 
-        with open(f"final_scores_{language}_{direction}.txt", "w", encoding="utf-8") as f:
+        with open(final_scores_path, "w", encoding="utf-8") as f:
             f.write(f"Language: {language}  Direction: {direction}  ({src_col} -> {tgt_col})\n")
             f.write(f"VAL  loss   : {val_loss:.4f}\n")
             f.write(f"VAL  BLEU   : {val_bleu:.4f}\n")
@@ -526,8 +546,9 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
             f.write(f"TEST BLEU   : {test_bleu:.4f}\n")
             f.write(f"TEST chrF++ : {test_chrf:.4f}\n")
 
-        append_master_scores(language, direction, val_loss, val_bleu, val_chrf, test_bleu, test_chrf)
-        print(f"\nDone with {language}/{direction}. Master scores: {SCORES_CSV}")
+        append_master_scores(language, direction, val_loss, val_bleu, val_chrf,
+                              test_bleu, test_chrf, scores_csv=scores_csv)
+        print(f"\nDone with {language}/{direction}. Master scores: {scores_csv}")
 
     # ---- Resync before the next direction ----
     # Only rank 0 ran the block above (generation over val+test on an 8B
@@ -568,8 +589,23 @@ def _init_distributed_with_extended_timeout(hours=6):
           f"(rank={dist.get_rank()}/{dist.get_world_size()})")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--smoke_test", action="store_true",
+                         help="Run a tiny end-to-end pass (few rows, eval/save "
+                              "every 5 steps) to sanity-check the pipeline "
+                              "instead of a real training run.")
+    parser.add_argument("--smoke_rows", type=int, default=300,
+                         help="Number of training rows to use in smoke-test mode.")
+    parser.add_argument("--smoke_val_rows", type=int, default=60,
+                         help="Number of val/test rows to use in smoke-test mode.")
+    # torchrun forwards the same argv to every rank, so this is safe under DDP.
+    return parser.parse_args()
+
+
 def main():
     _init_distributed_with_extended_timeout()
+    args = parse_args()
 
     config_path = Path(__file__).resolve().parent / "config.json"
     with open(config_path, "r", encoding="utf-8") as f:
@@ -587,7 +623,9 @@ def main():
         directions = [directions]
 
     for direction in directions:
-        run_direction(language, direction, train_csv, val_csv, test_csv, epochs)
+        run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
+                      smoke_test=args.smoke_test, smoke_rows=args.smoke_rows,
+                      smoke_val_rows=args.smoke_val_rows)
 
 
 if __name__ == "__main__":

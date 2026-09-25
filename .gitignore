@@ -11,9 +11,12 @@ maha_data_2/
 nllb-*-finetuned/
 mt5-*-finetuned/
 qwen-*-finetuned/
+qwen-*-finetuned-smoketest/
 llama-*-finetuned/
+llama-*-finetuned-smoketest/
 splits_*/
 all_languages_scores.csv
+all_languages_scores-smoketest.csv
 all_marathi_scores.csv
 test_predictions_*.csv
 final_scores_*.txt
