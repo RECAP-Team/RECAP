@@ -1,0 +1,30 @@
+#!/bin/sh
+#PBS -N it2_bhili
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=8:ngpus=2
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/indictrans2_finetune
+
+source ~/.bashrc
+conda activate mt5
+
+# One language, both directions -- 2 tasks on 2 GPUs (1 per GPU, zero idle
+# GPU time). Part of an 8-job x 2-GPU split of the full 16-task sweep
+# (4 IndicTrans2 jobs + 4 Sarvam jobs here) -- smaller GPU requests are
+# easier to get scheduled than the 4-GPU batch1/batch2 jobs, at the same
+# total 16-GPU parallelism if all 8 land around the same time. See
+# run_indictrans2_finetune.pbs (single 4-GPU job, all languages) and
+# run_indictrans2_batch1.pbs/batch2.pbs (2x 4-GPU jobs) for the other splits.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python finetune_indictrans2.py \
+    --server pragya \
+    --langs Bhili \
+    --directions hi2tgt,tgt2hi

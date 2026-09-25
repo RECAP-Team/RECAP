@@ -1,0 +1,24 @@
+#!/bin/sh
+#PBS -N it2_marathi
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=8:ngpus=2
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/indictrans2_finetune
+
+source ~/.bashrc
+conda activate mt5
+
+# One language, both directions -- 2 tasks on 2 GPUs. See run_indictrans2_bhili.pbs.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python finetune_indictrans2.py \
+    --server pragya \
+    --langs Marathi \
+    --directions hi2tgt,tgt2hi
