@@ -1,13 +1,15 @@
 """
-Fill the empty Bhili/Mundari translation columns across the 6 xnli/*.csv
+Fill the empty Bhili/Mundari translation columns across the 6 xnli/ data
 files using finetuned mt5 hi2tgt checkpoints (beam=2, batch=64). Gondi
 columns are never touched (out of scope -- no Gondi checkpoint used here).
+Input files may be .csv or .xlsx (find_input_file() accepts either, csv
+preferred); output is always written as .csv.
 
-One job = one (csv_file, language) pair, e.g. "test.csv" + "Bhili". A job
-loads that language's mt5 hi2tgt checkpoint ONCE and translates every Hindi
-source column in that file into its matching Bhili/Mundari target column --
-only the currently-empty cells; already-filled cells are left untouched.
-6 files x 2 languages (Bhili, Mundari) = 12 jobs.
+One job = one (file stem, language) pair, e.g. "test" + "Bhili". A job loads
+that language's mt5 hi2tgt checkpoint ONCE and translates every Hindi source
+column in that file into its matching Bhili/Mundari target column -- only
+the currently-empty cells; already-filled cells are left untouched. 6 files
+x 2 languages (Bhili, Mundari) = 12 jobs.
 
 Jobs run one-per-GPU, pulled off a shared queue -- same GPU-pool pattern as
 indictrans2_finetune/finetune_indictrans2.py: pool_size = min(n_gpus,
@@ -23,8 +25,8 @@ Each job writes its own partial CSV (row_idx + prediction) per target
 column, so progress survives a crash/timeout. After every job finishes, one
 merge pass (in the parent process, strictly after the pool has joined --
 no concurrent writers, no lock needed) overlays all partial files onto a
-fresh copy of each original CSV and writes the finished file to
-<output_dir>/<csv_file>.
+fresh copy of each original file and writes the finished CSV to
+<output_dir>/<stem>.csv.
 
 Run (on Pragya, from this directory):
     python xnli_infer.py
@@ -51,28 +53,33 @@ RECAP_ROOT = HERE.parent
 #      don't share a naming convention consistent enough to detect safely
 #      with a generic regex, e.g. "hindi" vs "Hindi" case differs per file). ----
 CSV_CONFIG = {
-    "datasets_bbc_hindi_articles_labeled - datasets_bbc_hindi_articles_labeled.csv": [
+    "datasets_bbc_hindi_articles_labeled - datasets_bbc_hindi_articles_labeled": [
         {"src_col": "Headline_Hindi", "Bhili": "Headline_Bhili", "Mundari": "Headline_Mundari"},
         {"src_col": "Content_Hindi",  "Bhili": "Content_Bhili",  "Mundari": "Content_Mundari"},
     ],
-    "hindi_movie_polarity - hindi_movie_polarity.csv": [
+    "hindi_movie_polarity - hindi_movie_polarity": [
         {"src_col": "Hindi", "Bhili": "Bhili", "Mundari": "Mundari"},
     ],
-    "Hindi_quora.csv": [
+    "Hindi_quora": [
         {"src_col": "question1_hindi", "Bhili": "question1_bhili", "Mundari": "question1_mundari"},
         {"src_col": "question2_hindi", "Bhili": "question2_bhili", "Mundari": "question2_mundari"},
     ],
-    "hindi_sentiment_preprocessed_twitter_sentiment - hindi_sentiment_preprocessed_twitter_sentiment.csv": [
+    "hindi_sentiment_preprocessed_twitter_sentiment - hindi_sentiment_preprocessed_twitter_sentiment": [
         {"src_col": "Hindi", "Bhili": "Bhili", "Mundari": "Mundari"},
     ],
-    "test.csv": [
+    "test": [
         {"src_col": "Hindi", "Bhili": "Bhili", "Mundari": "Mundari"},
     ],
-    "xnli_hindi_test_corrected.csv": [
+    "xnli_hindi_test_corrected": [
         {"src_col": "Premise_Hindi",    "Bhili": "Premise_Bhili",    "Mundari": "Premise_Mundari"},
         {"src_col": "Hypothesis_Hindi", "Bhili": "Hypothesis_Bhili", "Mundari": "Hypothesis_Mundari"},
     ],
 }
+# CSV_CONFIG is keyed by file STEM (no extension) -- the source data was
+# still .xlsx on Pragya as of this writing (only the local Mac copies had
+# been converted to .csv), so input files are resolved by stem via
+# find_input_file() below, accepting either extension transparently. Output
+# is always written as .csv regardless of the input's extension.
 
 # mt5 hi2tgt checkpoints trained earlier in this project -- see
 # mt5_finetune/Bhili/infer_config.json / mt5_finetune/Mundari/infer_config.json
@@ -98,24 +105,43 @@ def _is_empty(val):
     return s == "" or s.lower() == "nan"
 
 
+def find_input_file(input_dir, stem):
+    """Resolve a CSV_CONFIG stem to an actual file, preferring .csv but
+    falling back to .xlsx -- lets the same script run whether or not the
+    source data has been pre-converted from xlsx."""
+    csv_path = Path(input_dir) / f"{stem}.csv"
+    if csv_path.exists():
+        return csv_path
+    xlsx_path = Path(input_dir) / f"{stem}.xlsx"
+    if xlsx_path.exists():
+        return xlsx_path
+    return None
+
+
+def read_input(path):
+    return pd.read_excel(path) if path.suffix.lower() == ".xlsx" else pd.read_csv(path)
+
+
 def _flush_partial(partial_path, row_idx_list, pred_list):
     out = pd.DataFrame({"row_idx": row_idx_list, "prediction": pred_list})
     file_exists = os.path.exists(partial_path)
     out.to_csv(partial_path, mode="a", header=not file_exists, index=False, encoding="utf-8-sig")
 
 
-def run_job(csv_file, language, args):
-    job_name = f"{Path(csv_file).stem}__{language}"
+def run_job(stem, language, args):
+    job_name = f"{stem}__{language}"
     checkpoint_path = CHECKPOINTS[language]
-    col_groups = CSV_CONFIG[csv_file]
+    col_groups = CSV_CONFIG[stem]
 
     print(f"\n========== {job_name} (gpu {_worker_gpu_id}) ==========")
     print(f"  checkpoint: {checkpoint_path}")
 
-    df = pd.read_csv(Path(args.input_dir) / csv_file)
+    in_path = find_input_file(args.input_dir, stem)
+    assert in_path is not None, f"no {stem}.csv or {stem}.xlsx found in {args.input_dir}"
+    df = read_input(in_path)
     for group in col_groups:
-        assert group["src_col"] in df.columns, f"'{group['src_col']}' missing in {csv_file}"
-        assert group[language] in df.columns, f"'{group[language]}' missing in {csv_file}"
+        assert group["src_col"] in df.columns, f"'{group['src_col']}' missing in {in_path.name}"
+        assert group[language] in df.columns, f"'{group[language]}' missing in {in_path.name}"
 
     partial_dir = Path(args.output_dir) / "_partial"
     if not args.dry_run:
@@ -127,7 +153,7 @@ def run_job(csv_file, language, args):
     for group in col_groups:
         src_col = group["src_col"]
         tgt_col = group[language]
-        partial_path = partial_dir / f"{Path(csv_file).stem}__{tgt_col}.csv"
+        partial_path = partial_dir / f"{stem}__{tgt_col}.csv"
 
         done_idx = set()
         if partial_path.exists():
@@ -215,35 +241,37 @@ def _pool_init(gpu_queue):
 
 
 def _pool_run(job_args):
-    csv_file, language, args = job_args
-    run_job(csv_file, language, args)
+    stem, language, args = job_args
+    run_job(stem, language, args)
 
 
 def merge_outputs(args):
     """Overlay every job's partial predictions onto a fresh copy of the
-    original CSV and write the finished file to output_dir/<csv_file>. Runs
-    once in the parent process, strictly after the worker pool has joined --
-    no concurrent writers, so no lock is needed here."""
+    original data and write the finished file to output_dir/<stem>.csv
+    (always .csv, regardless of whether the input was .xlsx). Runs once in
+    the parent process, strictly after the worker pool has joined -- no
+    concurrent writers, so no lock is needed here."""
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     partial_dir = out_dir / "_partial"
 
-    for csv_file, col_groups in CSV_CONFIG.items():
-        df = pd.read_csv(Path(args.input_dir) / csv_file)
+    for stem, col_groups in CSV_CONFIG.items():
+        in_path = find_input_file(args.input_dir, stem)
+        df = read_input(in_path)
         filled = 0
         for group in col_groups:
             for language in ("Bhili", "Mundari"):
                 tgt_col = group[language]
-                partial_path = partial_dir / f"{Path(csv_file).stem}__{tgt_col}.csv"
+                partial_path = partial_dir / f"{stem}__{tgt_col}.csv"
                 if not partial_path.exists():
                     continue
                 part = pd.read_csv(partial_path)
                 for _, r in part.iterrows():
                     df.at[int(r["row_idx"]), tgt_col] = r["prediction"]
                     filled += 1
-        out_path = out_dir / csv_file
+        out_path = out_dir / f"{stem}.csv"
         df.to_csv(out_path, index=False, encoding="utf-8-sig")
-        print(f"[Merge] {csv_file}: {filled} cells filled -> {out_path}")
+        print(f"[Merge] {stem}: {filled} cells filled -> {out_path}")
 
 
 def main():
@@ -256,17 +284,19 @@ def main():
                           "sanity-check column detection against local CSVs.")
     args = ap.parse_args()
 
-    for csv_file in CSV_CONFIG:
-        assert (Path(args.input_dir) / csv_file).exists(), \
-            f"expected input CSV not found: {Path(args.input_dir) / csv_file}"
+    for stem in CSV_CONFIG:
+        found = find_input_file(args.input_dir, stem)
+        assert found is not None, \
+            f"expected input file not found: {Path(args.input_dir) / stem}.csv (or .xlsx)"
+        print(f"[input] {stem} -> {found}")
 
-    jobs = [(csv_file, language) for csv_file in CSV_CONFIG for language in ("Bhili", "Mundari")]
+    jobs = [(stem, language) for stem in CSV_CONFIG for language in ("Bhili", "Mundari")]
     print(f"[jobs] {len(jobs)} total (6 files x 2 languages)")
 
     if args.dry_run:
         print("[dry_run] Skipping GPU pool -- running all jobs sequentially, no model load.")
-        for csv_file, language in jobs:
-            run_job(csv_file, language, args)
+        for stem, language in jobs:
+            run_job(stem, language, args)
         return
 
     import torch
@@ -283,7 +313,7 @@ def main():
     for gpu_id in range(pool_size):
         gpu_queue.put(gpu_id)
 
-    job_args = [(csv_file, language, args) for csv_file, language in jobs]
+    job_args = [(stem, language, args) for stem, language in jobs]
     with ctx.Pool(processes=pool_size, initializer=_pool_init, initargs=(gpu_queue,)) as pool:
         pool.map(_pool_run, job_args)
 
