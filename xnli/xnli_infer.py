@@ -1,15 +1,17 @@
 """
-Fill the empty Bhili/Mundari translation columns across the 6 xnli/ data
-files using finetuned mt5 hi2tgt checkpoints (beam=2, batch=64). Gondi
-columns are never touched (out of scope -- no Gondi checkpoint used here).
-Input files may be .csv or .xlsx (find_input_file() accepts either, csv
+Fill the empty Bhili/Mundari/Gondi translation columns across the 6 xnli/
+data files using finetuned mt5 hi2tgt checkpoints (beam=2, batch=64). Input
+files may be .csv or .xlsx (find_input_file() accepts either, csv
 preferred); output is always written as .csv.
 
 One job = one (file stem, language) pair, e.g. "test" + "Bhili". A job loads
 that language's mt5 hi2tgt checkpoint ONCE and translates every Hindi source
-column in that file into its matching Bhili/Mundari target column -- only
-the currently-empty cells; already-filled cells are left untouched. 6 files
-x 2 languages (Bhili, Mundari) = 12 jobs.
+column in that file into its matching target column -- only the
+currently-empty cells; already-filled cells are left untouched. 6 files x 3
+languages (LANGUAGES = Bhili, Mundari, Gondi) = 18 jobs. Bhili/Mundari were
+run first (partial files from that run already exist in output_dir/_partial/
+and are picked up automatically -- those jobs will report 0 pending and skip
+straight to done); this run adds Gondi on top without redoing that work.
 
 Jobs run one-per-GPU, pulled off a shared queue -- same GPU-pool pattern as
 indictrans2_finetune/finetune_indictrans2.py: pool_size = min(n_gpus,
@@ -52,27 +54,29 @@ RECAP_ROOT = HERE.parent
 #      column(s), per file (hardcoded from the actual headers -- these files
 #      don't share a naming convention consistent enough to detect safely
 #      with a generic regex, e.g. "hindi" vs "Hindi" case differs per file). ----
+LANGUAGES = ("Bhili", "Mundari", "Gondi")
+
 CSV_CONFIG = {
     "datasets_bbc_hindi_articles_labeled - datasets_bbc_hindi_articles_labeled": [
-        {"src_col": "Headline_Hindi", "Bhili": "Headline_Bhili", "Mundari": "Headline_Mundari"},
-        {"src_col": "Content_Hindi",  "Bhili": "Content_Bhili",  "Mundari": "Content_Mundari"},
+        {"src_col": "Headline_Hindi", "Bhili": "Headline_Bhili", "Mundari": "Headline_Mundari", "Gondi": "Headline_Gondi"},
+        {"src_col": "Content_Hindi",  "Bhili": "Content_Bhili",  "Mundari": "Content_Mundari",  "Gondi": "Content_Gondi"},
     ],
     "hindi_movie_polarity - hindi_movie_polarity": [
-        {"src_col": "Hindi", "Bhili": "Bhili", "Mundari": "Mundari"},
+        {"src_col": "Hindi", "Bhili": "Bhili", "Mundari": "Mundari", "Gondi": "Gondi"},
     ],
     "Hindi_quora": [
-        {"src_col": "question1_hindi", "Bhili": "question1_bhili", "Mundari": "question1_mundari"},
-        {"src_col": "question2_hindi", "Bhili": "question2_bhili", "Mundari": "question2_mundari"},
+        {"src_col": "question1_hindi", "Bhili": "question1_bhili", "Mundari": "question1_mundari", "Gondi": "question1_gondi"},
+        {"src_col": "question2_hindi", "Bhili": "question2_bhili", "Mundari": "question2_mundari", "Gondi": "question2_gondi"},
     ],
     "hindi_sentiment_preprocessed_twitter_sentiment - hindi_sentiment_preprocessed_twitter_sentiment": [
-        {"src_col": "Hindi", "Bhili": "Bhili", "Mundari": "Mundari"},
+        {"src_col": "Hindi", "Bhili": "Bhili", "Mundari": "Mundari", "Gondi": "Gondi"},
     ],
     "test": [
-        {"src_col": "Hindi", "Bhili": "Bhili", "Mundari": "Mundari"},
+        {"src_col": "Hindi", "Bhili": "Bhili", "Mundari": "Mundari", "Gondi": "Gondi"},
     ],
     "xnli_hindi_test_corrected": [
-        {"src_col": "Premise_Hindi",    "Bhili": "Premise_Bhili",    "Mundari": "Premise_Mundari"},
-        {"src_col": "Hypothesis_Hindi", "Bhili": "Hypothesis_Bhili", "Mundari": "Hypothesis_Mundari"},
+        {"src_col": "Premise_Hindi",    "Bhili": "Premise_Bhili",    "Mundari": "Premise_Mundari",    "Gondi": "Premise_Gondi"},
+        {"src_col": "Hypothesis_Hindi", "Bhili": "Hypothesis_Bhili", "Mundari": "Hypothesis_Mundari", "Gondi": "Hypothesis_Gondi"},
     ],
 }
 # CSV_CONFIG is keyed by file STEM (no extension) -- the source data was
@@ -82,11 +86,12 @@ CSV_CONFIG = {
 # is always written as .csv regardless of the input's extension.
 
 # mt5 hi2tgt checkpoints trained earlier in this project -- see
-# mt5_finetune/Bhili/infer_config.json / mt5_finetune/Mundari/infer_config.json
-# for the same paths used there.
+# mt5_finetune/{Bhili,Mundari,Gondi}/infer_config.json for the same paths
+# used there.
 CHECKPOINTS = {
     "Bhili":   str(RECAP_ROOT / "mt5_finetune" / "Bhili" / "mt5-bhili-hi2tgt-finetuned"),
     "Mundari": str(RECAP_ROOT / "mt5_finetune" / "Mundari" / "mt5-mundari-hi2tgt-finetuned"),
+    "Gondi":   str(RECAP_ROOT / "mt5_finetune" / "Gondi" / "mt5-gondi-hi2tgt-finetuned"),
 }
 
 DEFAULT_INPUT_DIR = "/home/scai/msr/aiy257590/flash/xnli"
@@ -260,7 +265,7 @@ def merge_outputs(args):
         df = read_input(in_path)
         filled = 0
         for group in col_groups:
-            for language in ("Bhili", "Mundari"):
+            for language in LANGUAGES:
                 tgt_col = group[language]
                 partial_path = partial_dir / f"{stem}__{tgt_col}.csv"
                 if not partial_path.exists():
@@ -290,8 +295,8 @@ def main():
             f"expected input file not found: {Path(args.input_dir) / stem}.csv (or .xlsx)"
         print(f"[input] {stem} -> {found}")
 
-    jobs = [(stem, language) for stem in CSV_CONFIG for language in ("Bhili", "Mundari")]
-    print(f"[jobs] {len(jobs)} total (6 files x 2 languages)")
+    jobs = [(stem, language) for stem in CSV_CONFIG for language in LANGUAGES]
+    print(f"[jobs] {len(jobs)} total (6 files x {len(LANGUAGES)} languages)")
 
     if args.dry_run:
         print("[dry_run] Skipping GPU pool -- running all jobs sequentially, no model load.")
