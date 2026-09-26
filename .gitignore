@@ -1,6 +1,10 @@
 Models/
 datasets
 
+# xnli/ -- raw data CSVs (converted from xlsx locally), kept out of git like
+# every other dataset in this repo. xnli_infer.py itself is still tracked.
+xnli/*.csv
+
 # train.py (nllb_diff_*_dirs) per-direction outputs + tokenizer extensions
 **/directions/
 **/tok_extensions/
