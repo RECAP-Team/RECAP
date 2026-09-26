@@ -249,6 +249,12 @@ class CausalLMPaddingCollator:
 def generate_and_score(records, src_col, tgt_col, src_name, tgt_name,
                         model, tokenizer, device, num_beams=2, batch_size=16):
     model.eval()
+    # gradient_checkpointing=True (needed to fit 8B full fine-tuning on 2
+    # GPUs) makes Trainer set config.use_cache=False for training -- without
+    # turning it back on here, every generate() call below loses the KV
+    # cache and gets markedly slower, which matters a lot on the real
+    # (non-smoke) 10K+-row test set.
+    model.config.use_cache = True
     tokenizer.padding_side = "left"  # required for correct batched causal-LM generation
 
     eot_id = tokenizer.convert_tokens_to_ids(EOT_TOKEN)
@@ -449,6 +455,7 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
         per_device_train_batch_size=4,
         per_device_eval_batch_size=4,
         gradient_accumulation_steps=8,
+        gradient_checkpointing=True,
         learning_rate=2e-5,
         lr_scheduler_type="cosine",
         warmup_steps=warmup_steps,
