@@ -331,7 +331,8 @@ def _has_final_model(output_dir):
 
 
 def run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
-                   smoke_test=False, smoke_rows=300, smoke_val_rows=60):
+                   smoke_test=False, smoke_rows=300, smoke_val_rows=60,
+                   smoke_warmup_steps=None):
     assert language in LANGUAGES, \
         f"Unknown language '{language}' in config.json, choices: {list(LANGUAGES.keys())}"
     assert direction in ["hi2tgt", "tgt2hi"], \
@@ -434,6 +435,8 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
     world_size = dist.get_world_size() if dist.is_available() and dist.is_initialized() else 1
     if already_trained:
         warmup_steps = 0  # training is skipped entirely in this case
+    elif smoke_warmup_steps is not None:
+        warmup_steps = smoke_warmup_steps  # diagnostic override, see --smoke_warmup_steps
     else:
         steps_per_epoch = -(-len(tokenized_train) // (4 * 8 * world_size))  # ceil div
         total_steps = steps_per_epoch * epochs
@@ -610,6 +613,10 @@ def parse_args():
                          help="Number of training rows to use in smoke-test mode.")
     parser.add_argument("--smoke_val_rows", type=int, default=60,
                          help="Number of val/test rows to use in smoke-test mode.")
+    parser.add_argument("--smoke_warmup_steps", type=int, default=None,
+                         help="Diagnostic override: force this many warmup steps "
+                              "in smoke-test mode instead of the usual 3%%-of-total "
+                              "(which rounds down to ~1 step at smoke scale).")
     # torchrun forwards the same argv to every rank, so this is safe under DDP.
     return parser.parse_args()
 
@@ -636,7 +643,8 @@ def main():
     for direction in directions:
         run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
                       smoke_test=args.smoke_test, smoke_rows=args.smoke_rows,
-                      smoke_val_rows=args.smoke_val_rows)
+                      smoke_val_rows=args.smoke_val_rows,
+                      smoke_warmup_steps=args.smoke_warmup_steps)
 
 
 if __name__ == "__main__":
