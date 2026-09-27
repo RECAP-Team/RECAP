@@ -460,7 +460,13 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
         per_device_train_batch_size=4,
         per_device_eval_batch_size=4,
         gradient_accumulation_steps=8,
-        learning_rate=2e-5,
+        # Lowered from 2e-5: the real (non-smoke) run diverged catastrophically
+        # in BOTH directions (loss -> 5.3e17 then permanent NaN, well past
+        # warmup) -- not a data/warmup issue this time, since warmup was a
+        # substantial ~165 steps here, not the tiny smoke-scale case fixed
+        # earlier. 2e-5 appears too aggressive for full bf16 fine-tuning of
+        # an 8B model at this scale; halving is the standard first remedy.
+        learning_rate=1e-5,
         lr_scheduler_type="cosine",
         warmup_steps=warmup_steps,
         eval_strategy="steps",
