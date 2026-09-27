@@ -440,7 +440,15 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs,
     else:
         steps_per_epoch = -(-len(tokenized_train) // (4 * 8 * world_size))  # ceil div
         total_steps = steps_per_epoch * epochs
-        warmup_steps = max(1, int(0.03 * total_steps))
+        # At smoke-test scale (9-48 total steps) 3% rounds down to ~1 step,
+        # which jumps straight to full LR on step 1 -- confirmed via
+        # --smoke_warmup_steps to cause a real NaN divergence on tgt2hi
+        # (huge early pre-clip grad norms, e.g. 13110, absorbed safely by a
+        # real ramp but not by a 1-step one). Real runs have thousands of
+        # steps, so 0.03*total_steps is always far above this floor there --
+        # only smoke-test-scale runs are affected.
+        min_warmup = 20 if smoke_test else 1
+        warmup_steps = max(min_warmup, int(0.03 * total_steps))
 
     # === TRAINING ARGS: full-parameter LLM SFT recipe (AdamW, small LR,
     #     short warmup, few epochs), plus DeepSpeed ZeRO-2 -- REQUIRED for
