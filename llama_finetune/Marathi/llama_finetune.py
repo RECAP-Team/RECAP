@@ -625,6 +625,13 @@ def parse_args():
                          help="Diagnostic override: force this many warmup steps "
                               "in smoke-test mode instead of the usual 3%%-of-total "
                               "(which rounds down to ~1 step at smoke scale).")
+    parser.add_argument("--direction", choices=["hi2tgt", "tgt2hi"], default=None,
+                         help="Run only this direction instead of every direction "
+                              "in config.json. Lets hi2tgt and tgt2hi run as two "
+                              "separate PBS jobs (each with its own 4-GPU "
+                              "DeepSpeed allocation) in parallel instead of "
+                              "sequentially in one job -- see "
+                              "run_llama_marathi_hi2tgt.pbs / _tgt2hi.pbs.")
     # torchrun forwards the same argv to every rank, so this is safe under DDP.
     return parser.parse_args()
 
@@ -647,6 +654,9 @@ def main():
     # "direction" can be a single string or a list
     if isinstance(directions, str):
         directions = [directions]
+
+    if args.direction is not None:
+        directions = [args.direction]
 
     for direction in directions:
         run_direction(language, direction, train_csv, val_csv, test_csv, epochs,

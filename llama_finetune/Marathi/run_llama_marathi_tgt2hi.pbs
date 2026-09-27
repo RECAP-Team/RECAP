@@ -1,0 +1,25 @@
+#!/bin/sh
+#PBS -N llama_marathi_tgt2hi
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=8:ngpus=4
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/llama_finetune/Marathi
+
+source ~/.bashrc
+conda activate qwen_llama
+
+# DeepSpeed ZeRO-2 across its own 4 GPUs, tgt2hi ONLY -- run alongside
+# run_llama_marathi_hi2tgt.pbs (separate job, separate 4-GPU allocation) to
+# get both directions training in parallel instead of sequentially in one
+# job. ncpus=8 = 2 dataloader workers x 4 ranks (dataloader_num_workers=2 in
+# the script).
+/home/scai/msr/aiy257590/.conda/envs/qwen_llama/bin/python -m torch.distributed.run --nproc_per_node=4 llama_finetune.py --direction tgt2hi
