@@ -3,7 +3,7 @@
 #PBS -P misn.mota2.spons
 #PBS -m bea
 #PBS -M aiy257590@scai.iitd.ac.in
-#PBS -l select=1:ncpus=4:ngpus=2
+#PBS -l select=1:ncpus=32:ngpus=2
 #PBS -l walltime=48:00:00
 
 echo "==============================="
