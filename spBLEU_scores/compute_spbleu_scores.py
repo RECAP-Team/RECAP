@@ -1,7 +1,10 @@
 """
 Compute spBLEU (sacrebleu tokenize="flores200") and chrF++ (word_order=2)
 from each model's saved prediction/reference text, for BOTH val and test
-splits. Writes one CSV per model into this directory, covering
+splits. Writes one CSV per model into this directory (one row per
+language+direction, val and test side by side: language, direction,
+val_rows, val_spBLEU, val_chrF++, test_rows, test_spBLEU, test_chrF++),
+covering
 Bhili/Mundari/Gondi only (no Marathi -- never in scope here, and Marathi
 only ever has hi2tgt/tgt2hi since its data has no English column).
 
@@ -90,6 +93,21 @@ def score_model(recap_root, model_root_name):
     return rows
 
 
+def pivot_to_wide(rows):
+    """One row per (language, direction), val and test side by side --
+    e.g. language, direction, val_rows, val_spBLEU, val_chrF++, test_rows,
+    test_spBLEU, test_chrF++. Separate val_rows/test_rows rather than one
+    shared rows column since the two splits can have different sizes."""
+    by_key = {}
+    for r in rows:
+        key = (r["language"], r["direction"])
+        entry = by_key.setdefault(key, {"language": r["language"], "direction": r["direction"]})
+        entry[f"{r['split']}_rows"] = r["rows"]
+        entry[f"{r['split']}_spBLEU"] = r["spBLEU"]
+        entry[f"{r['split']}_chrF++"] = r["chrF++"]
+    return list(by_key.values())
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--recap_root",
@@ -99,14 +117,17 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    cols = ["language", "direction", "split", "rows", "spBLEU", "chrF++"]
+    cols = ["language", "direction",
+            "val_rows", "val_spBLEU", "val_chrF++",
+            "test_rows", "test_spBLEU", "test_chrF++"]
 
     for display_name, out_stem, model_root_name in MODELS:
         print(f"\n===== {display_name} =====")
         rows = score_model(args.recap_root, model_root_name)
+        wide_rows = pivot_to_wide(rows)
         out_path = out_dir / f"{out_stem}.csv"
-        pd.DataFrame(rows, columns=cols).to_csv(out_path, index=False)
-        print(f"-> {out_path} ({len(rows)} rows)")
+        pd.DataFrame(wide_rows, columns=cols).to_csv(out_path, index=False)
+        print(f"-> {out_path} ({len(wide_rows)} rows)")
 
     print("\nAll done.")
 
