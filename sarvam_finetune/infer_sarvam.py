@@ -43,7 +43,7 @@ from sarvam_finetune import load_splits, build_messages, HERE
 
 MAX_LENGTH = 512
 MAX_NEW_TOKENS = 256
-NUM_BEAMS = 2
+NUM_BEAMS = 4
 BATCH_SIZE = 16
 SAVE_EVERY_ROWS = 2000
 SPLITS = ["val", "test"]
