@@ -1,0 +1,29 @@
+#!/bin/sh
+#PBS -N spbleu_qwen_sarvam
+#PBS -P misn.mota2.spons
+#PBS -q high
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=32:ngpus=2
+#PBS -l walltime=04:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP
+
+# Qwen (small, 0.5B) + Sarvam (~4B) grouped together in one 2-GPU job,
+# since both are much lighter than Llama-3.1-8B (which gets its own
+# dedicated job -- see pbs_spbleu_job4_llama.pbs).
+for lang in Bhili Mundari Gondi; do
+    echo "--- Qwen / $lang ---"
+    (cd qwen_finetune/$lang && conda run -n qwen_llama --no-capture-output python infer.py)
+done
+
+echo "--- Sarvam (all languages) ---"
+(cd sarvam_finetune && conda run -n sarvam --no-capture-output python infer_sarvam.py)
+
+echo "Qwen + Sarvam job done."

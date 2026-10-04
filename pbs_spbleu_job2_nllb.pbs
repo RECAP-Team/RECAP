@@ -1,0 +1,24 @@
+#!/bin/sh
+#PBS -N spbleu_nllb
+#PBS -P misn.mota2.spons
+#PBS -q high
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=32:ngpus=2
+#PBS -l walltime=04:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP
+
+# NLLB inference, all 3 languages, val+test, all directions.
+for lang in Bhili Mundari Gondi; do
+    echo "--- NLLB / $lang ---"
+    (cd NLLB-finetune/$lang && conda run -n mt5 --no-capture-output python infer.py)
+done
+
+echo "NLLB job done."

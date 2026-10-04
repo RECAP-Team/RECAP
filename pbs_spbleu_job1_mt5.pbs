@@ -1,0 +1,27 @@
+#!/bin/sh
+#PBS -N spbleu_mt5
+#PBS -P misn.mota2.spons
+#PBS -q high
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=32:ngpus=2
+#PBS -l walltime=04:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP
+
+# mt5 inference, all 3 languages, val+test, all directions -- each
+# infer.py call internally round-robins its 8 jobs across however many
+# GPUs are visible (2 here), so Bhili/Mundari/Gondi each get both GPUs
+# working in parallel, one language at a time.
+for lang in Bhili Mundari Gondi; do
+    echo "--- mt5 / $lang ---"
+    (cd mt5_finetune/$lang && conda run -n mt5 --no-capture-output python infer.py)
+done
+
+echo "mt5 job done."
