@@ -1,0 +1,27 @@
+#!/bin/sh
+#PBS -N sarvam_mundari_en
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=8:ngpus=2
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/sarvam_finetune
+
+source ~/.bashrc
+conda activate sarvam
+
+# English<->Mundari, both directions -- 2 tasks on 2 GPUs (1 per GPU, zero
+# idle GPU time). Alongside run_sarvam_bhili_en.pbs/run_sarvam_gondi_en.pbs
+# for the other two English-capable languages (Marathi has no English
+# column, see config.json's "en_col", so it's excluded). Same 1-job-per-GPU
+# pool pattern as run_sarvam_mundari.pbs (Hindi directions).
+/home/scai/msr/aiy257590/.conda/envs/sarvam/bin/python sarvam_finetune.py \
+    --langs Mundari \
+    --directions en2tgt,tgt2en

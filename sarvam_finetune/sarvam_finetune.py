@@ -1,9 +1,19 @@
 """
 Full fine-tune sarvamai/sarvam-translate for Hindi<->{Bhili,Mundari,Gondi,
-Marathi}, both directions (8 jobs total), auto-detecting GPUs and running
-one job per GPU in parallel (a fixed-size worker pool pulls from a job
-queue -- works whether you request fewer, equal, or more GPUs than jobs).
-Pragya only -- no multi-server config, unlike indictrans2_finetune/.
+Marathi} (hi2tgt/tgt2hi, 8 jobs) and additionally English<->{Bhili,Mundari,
+Gondi} (en2tgt/tgt2en, 6 more jobs -- Marathi's data has no English column,
+see config.json's "en_col", so it's excluded from these two directions),
+auto-detecting GPUs and running one job per GPU in parallel (a fixed-size
+worker pool pulls from a job queue -- works whether you request fewer,
+equal, or more GPUs than jobs). Pragya only -- no multi-server config,
+unlike indictrans2_finetune/.
+
+Unlike IndicTrans2 (which ships three separate English/Indic/Indic-Indic
+checkpoints and has no English representations at all in the indic-indic
+one this repo uses), Sarvam-Translate is a general instruction-tuned LLM --
+English directions need no base-model change, just reading the English
+column instead of Hindi's and the same "Translate the text below to
+{tgt_name}." chat prompt already used for Hindi.
 
 Unlike indictrans2_finetune/ (LoRA on an encoder-decoder model), this is
 FULL fine-tuning of a decoder-only causal LM, one independent job per GPU
@@ -48,6 +58,7 @@ mt5/nllb/indictrans2 tribal finetunes use).
 Run (auto-detects GPU count):
     python sarvam_finetune.py
     python sarvam_finetune.py --langs Bhili --directions hi2tgt
+    python sarvam_finetune.py --langs Bhili,Mundari,Gondi --directions en2tgt,tgt2en
     python sarvam_finetune.py --smoke_test   # tiny slice, few steps, fast
 
 Config (sarvam_finetune/config.json, same directory):
@@ -56,9 +67,9 @@ Config (sarvam_finetune/config.json, same directory):
       "data_root": ".../RECAP/datasets",
       "output_root": ".../RECAP/sarvam_finetune",
       "languages": {
-        "Bhili":   {"dir_name": "bhilli",  "tgt_col": "Bhili"},
-        "Mundari": {"dir_name": "Mundari", "tgt_col": "Mundari"},
-        "Gondi":   {"dir_name": "Gondi",   "tgt_col": "Gondi"},
+        "Bhili":   {"dir_name": "bhilli",  "tgt_col": "Bhili",   "en_col": "English"},
+        "Mundari": {"dir_name": "Mundari", "tgt_col": "Mundari", "en_col": "English"},
+        "Gondi":   {"dir_name": "Gondi",   "tgt_col": "Gondi",   "en_col": "English"},
         "Marathi": {"dir_name": "Marathi", "tgt_col": "Marathi"}
       }
     }
@@ -79,7 +90,8 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 HIN_NAME = "Hindi"
-DIRECTIONS = ["hi2tgt", "tgt2hi"]
+ENG_NAME = "English"
+DIRECTIONS = ["hi2tgt", "tgt2hi", "en2tgt", "tgt2en"]
 
 
 # =============================================================
@@ -96,12 +108,28 @@ def load_csv_pair(csv_path, hi_col, tgt_col):
     return df[hi_col].tolist(), df[tgt_col].tolist()
 
 
-def load_splits(cfg):
-    hi_col, tgt_col = "Hindi", cfg["tgt_col"]
-    train_hi, train_tgt = load_csv_pair(cfg["train_csv"], hi_col, tgt_col)
-    val_hi, val_tgt = load_csv_pair(cfg["val_csv"], hi_col, tgt_col)
-    test_hi, test_tgt = load_csv_pair(cfg["test_csv"], hi_col, tgt_col)
-    return (train_hi, train_tgt), (val_hi, val_tgt), (test_hi, test_tgt)
+def load_splits(cfg, direction):
+    """Returns (train_src,train_tgt), (val_src,val_tgt), (test_src,test_tgt),
+    tgt_name for this direction -- src/tgt column order and the generation
+    target's display name already resolved, so run_job() doesn't need its
+    own direction branching."""
+    tgt_col = cfg["tgt_col"]
+    if direction in ("hi2tgt", "tgt2hi"):
+        other_col, other_name = HIN_NAME, HIN_NAME
+    else:  # en2tgt, tgt2en
+        assert "en_col" in cfg, \
+            f"{direction} needs an 'en_col' in config.json for this language -- not supported here"
+        other_col, other_name = cfg["en_col"], ENG_NAME
+
+    if direction in ("hi2tgt", "en2tgt"):
+        src_col, lbl_col, tgt_name = other_col, tgt_col, tgt_col
+    else:  # tgt2hi, tgt2en
+        src_col, lbl_col, tgt_name = tgt_col, other_col, other_name
+
+    train_src, train_lbl = load_csv_pair(cfg["train_csv"], src_col, lbl_col)
+    val_src, val_lbl = load_csv_pair(cfg["val_csv"], src_col, lbl_col)
+    test_src, test_lbl = load_csv_pair(cfg["test_csv"], src_col, lbl_col)
+    return (train_src, train_lbl), (val_src, val_lbl), (test_src, test_lbl), tgt_name
 
 
 def build_jobs(languages_cfg, langs, directions):
@@ -110,6 +138,9 @@ def build_jobs(languages_cfg, langs, directions):
         assert lang in languages_cfg, f"unknown language {lang!r}, choices: {list(languages_cfg)}"
         for direction in directions:
             assert direction in DIRECTIONS, f"unknown direction {direction!r}, choices: {DIRECTIONS}"
+            if direction in ("en2tgt", "tgt2en"):
+                assert "en_col" in languages_cfg[lang], \
+                    f"{lang} has no 'en_col' in config.json -- English directions unsupported for it"
             jobs.append((lang, direction))
     return jobs
 
@@ -250,7 +281,6 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
     tag = f"[{lang}/{direction} physical-gpu{gpu_id}]"
 
     cfg = lang_cfg[lang]
-    tgt_col = cfg["tgt_col"]
     suffix = "-smoketest" if args.smoke_test else ""
     output_dir = str(Path(args.output_root) / lang / f"sarvam-{lang.lower()}-{direction}-finetuned{suffix}")
     print(f"\n===== {tag}{' [SMOKE TEST]' if args.smoke_test else ''} =====")
@@ -269,13 +299,7 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
         print(f"{tag} resuming training from {resume_from_checkpoint}")
 
     print(f"{tag} loading data ...")
-    (train_hi, train_tgt), (val_hi, val_tgt), (test_hi, test_tgt) = load_splits(cfg)
-    if direction == "hi2tgt":
-        train_src, train_lbl, val_src, val_lbl, test_src, test_lbl = train_hi, train_tgt, val_hi, val_tgt, test_hi, test_tgt
-        tgt_name = tgt_col
-    else:  # tgt2hi
-        train_src, train_lbl, val_src, val_lbl, test_src, test_lbl = train_tgt, train_hi, val_tgt, val_hi, test_tgt, test_hi
-        tgt_name = HIN_NAME
+    (train_src, train_lbl), (val_src, val_lbl), (test_src, test_lbl), tgt_name = load_splits(cfg, direction)
 
     if args.smoke_test:
         train_src, train_lbl = train_src[:args.smoke_train_rows], train_lbl[:args.smoke_train_rows]
