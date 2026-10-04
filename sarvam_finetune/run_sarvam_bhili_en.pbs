@@ -1,9 +1,10 @@
 #!/bin/sh
-#PBS -N sarvam_bhili_en
+#PBS -N sarvam_bhili_tgt2en
 #PBS -P misn.mota2.spons
+#PBS -q high
 #PBS -m bea
 #PBS -M aiy257590@scai.iitd.ac.in
-#PBS -l select=1:ncpus=32:ngpus=2
+#PBS -l select=1:ncpus=16:ngpus=1
 #PBS -l walltime=48:00:00
 
 echo "==============================="
@@ -17,11 +18,9 @@ cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/sarvam_finetune
 source ~/.bashrc
 conda activate sarvam
 
-# English<->Bhili, both directions -- 2 tasks on 2 GPUs (1 per GPU, zero
-# idle GPU time). Alongside run_sarvam_mundari_en.pbs/run_sarvam_gondi_en.pbs
-# for the other two English-capable languages (Marathi has no English
-# column, see config.json's "en_col", so it's excluded). Same 1-job-per-GPU
-# pool pattern as run_sarvam_bhili.pbs (Hindi directions).
+# Bhili tgt2en ONLY, 1 GPU -- en2tgt is already running separately
+# (interactive session), so this just covers the other English direction
+# instead of both, to avoid duplicating that work.
 /home/scai/msr/aiy257590/.conda/envs/sarvam/bin/python sarvam_finetune.py \
     --langs Bhili \
-    --directions en2tgt,tgt2en
+    --directions tgt2en
