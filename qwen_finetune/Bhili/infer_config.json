@@ -1,7 +1,7 @@
 [
   {
-    "name": "bhili_en2tgt",
-    "csv_path": "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/inference_data/bhili.csv",
+    "name": "bhili_en2tgt_val",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/val.csv",
     "checkpoint_path": "./qwen-bhili-en2tgt-finetuned",
     "src_col": "English",
     "tgt_col": "Bhili",
@@ -9,8 +9,17 @@
     "tgt_name": "Bhili"
   },
   {
-    "name": "bhili_hi2tgt",
-    "csv_path": "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/inference_data/bhili.csv",
+    "name": "bhili_en2tgt_test",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/test.csv",
+    "checkpoint_path": "./qwen-bhili-en2tgt-finetuned",
+    "src_col": "English",
+    "tgt_col": "Bhili",
+    "src_name": "English",
+    "tgt_name": "Bhili"
+  },
+  {
+    "name": "bhili_hi2tgt_val",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/val.csv",
     "checkpoint_path": "./qwen-bhili-hi2tgt-finetuned",
     "src_col": "Hindi",
     "tgt_col": "Bhili",
@@ -18,8 +27,17 @@
     "tgt_name": "Bhili"
   },
   {
-    "name": "bhili_tgt2en",
-    "csv_path": "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/inference_data/bhili.csv",
+    "name": "bhili_hi2tgt_test",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/test.csv",
+    "checkpoint_path": "./qwen-bhili-hi2tgt-finetuned",
+    "src_col": "Hindi",
+    "tgt_col": "Bhili",
+    "src_name": "Hindi",
+    "tgt_name": "Bhili"
+  },
+  {
+    "name": "bhili_tgt2en_val",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/val.csv",
     "checkpoint_path": "./qwen-bhili-tgt2en-finetuned",
     "src_col": "Bhili",
     "tgt_col": "English",
@@ -27,8 +45,26 @@
     "tgt_name": "English"
   },
   {
-    "name": "bhili_tgt2hi",
-    "csv_path": "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/inference_data/bhili.csv",
+    "name": "bhili_tgt2en_test",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/test.csv",
+    "checkpoint_path": "./qwen-bhili-tgt2en-finetuned",
+    "src_col": "Bhili",
+    "tgt_col": "English",
+    "src_name": "Bhili",
+    "tgt_name": "English"
+  },
+  {
+    "name": "bhili_tgt2hi_val",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/val.csv",
+    "checkpoint_path": "./qwen-bhili-tgt2hi-finetuned",
+    "src_col": "Bhili",
+    "tgt_col": "Hindi",
+    "src_name": "Bhili",
+    "tgt_name": "Hindi"
+  },
+  {
+    "name": "bhili_tgt2hi_test",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/bhilli/test.csv",
     "checkpoint_path": "./qwen-bhili-tgt2hi-finetuned",
     "src_col": "Bhili",
     "tgt_col": "Hindi",

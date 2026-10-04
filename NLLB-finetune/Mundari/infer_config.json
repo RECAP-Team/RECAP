@@ -1,7 +1,7 @@
 [
   {
-    "name": "mundari_en2tgt",
-    "csv_path": "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/inference_data/mundari.csv",
+    "name": "mundari_en2tgt_val",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/val.csv",
     "checkpoint_path": "./nllb-mundari-en2tgt-finetuned",
     "src_col": "English",
     "tgt_col": "Mundari",
@@ -9,8 +9,17 @@
     "tgt_lang": "unr_Deva"
   },
   {
-    "name": "mundari_hi2tgt",
-    "csv_path": "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/inference_data/mundari.csv",
+    "name": "mundari_en2tgt_test",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/test.csv",
+    "checkpoint_path": "./nllb-mundari-en2tgt-finetuned",
+    "src_col": "English",
+    "tgt_col": "Mundari",
+    "src_lang": "eng_Latn",
+    "tgt_lang": "unr_Deva"
+  },
+  {
+    "name": "mundari_hi2tgt_val",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/val.csv",
     "checkpoint_path": "./nllb-mundari-hi2tgt-finetuned",
     "src_col": "Hindi",
     "tgt_col": "Mundari",
@@ -18,8 +27,17 @@
     "tgt_lang": "unr_Deva"
   },
   {
-    "name": "mundari_tgt2en",
-    "csv_path": "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/inference_data/mundari.csv",
+    "name": "mundari_hi2tgt_test",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/test.csv",
+    "checkpoint_path": "./nllb-mundari-hi2tgt-finetuned",
+    "src_col": "Hindi",
+    "tgt_col": "Mundari",
+    "src_lang": "hin_Deva",
+    "tgt_lang": "unr_Deva"
+  },
+  {
+    "name": "mundari_tgt2en_val",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/val.csv",
     "checkpoint_path": "./nllb-mundari-tgt2en-finetuned",
     "src_col": "Mundari",
     "tgt_col": "English",
@@ -27,8 +45,26 @@
     "tgt_lang": "eng_Latn"
   },
   {
-    "name": "mundari_tgt2hi",
-    "csv_path": "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/datasets/inference_data/mundari.csv",
+    "name": "mundari_tgt2en_test",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/test.csv",
+    "checkpoint_path": "./nllb-mundari-tgt2en-finetuned",
+    "src_col": "Mundari",
+    "tgt_col": "English",
+    "src_lang": "unr_Deva",
+    "tgt_lang": "eng_Latn"
+  },
+  {
+    "name": "mundari_tgt2hi_val",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/val.csv",
+    "checkpoint_path": "./nllb-mundari-tgt2hi-finetuned",
+    "src_col": "Mundari",
+    "tgt_col": "Hindi",
+    "src_lang": "unr_Deva",
+    "tgt_lang": "hin_Deva"
+  },
+  {
+    "name": "mundari_tgt2hi_test",
+    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/test.csv",
     "checkpoint_path": "./nllb-mundari-tgt2hi-finetuned",
     "src_col": "Mundari",
     "tgt_col": "Hindi",
