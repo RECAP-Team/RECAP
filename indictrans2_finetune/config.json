@@ -2,6 +2,8 @@
   "servers": {
     "pragya": {
       "base_model": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/IndicTrans2-indic-indic-1B",
+      "base_model_en_indic": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/IndicTrans2-en-indic-1B",
+      "base_model_indic_en": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/IndicTrans2-indic-en-1B",
       "data_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets",
       "output_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/indictrans2_finetune"
     },
@@ -12,9 +14,9 @@
     }
   },
   "languages": {
-    "Bhili":   {"dir_name": "bhilli",  "hi_col": "Hindi", "csv_col": "Bhili",   "lang_code": "bhb_Deva", "needs_new_tag": true},
-    "Mundari": {"dir_name": "Mundari", "hi_col": "Hindi", "csv_col": "Mundari", "lang_code": "unr_Deva", "needs_new_tag": false},
-    "Gondi":   {"dir_name": "Gondi",   "hi_col": "Hindi", "csv_col": "Gondi",   "lang_code": "gon_Deva", "needs_new_tag": false},
+    "Bhili":   {"dir_name": "bhilli",  "hi_col": "Hindi", "csv_col": "Bhili",   "en_col": "English", "lang_code": "bhb_Deva", "needs_new_tag": true},
+    "Mundari": {"dir_name": "Mundari", "hi_col": "Hindi", "csv_col": "Mundari", "en_col": "English", "lang_code": "unr_Deva", "needs_new_tag": false},
+    "Gondi":   {"dir_name": "Gondi",   "hi_col": "Hindi", "csv_col": "Gondi",   "en_col": "English", "lang_code": "gon_Deva", "needs_new_tag": false},
     "Marathi": {"dir_name": "Marathi", "hi_col": "Hindi", "csv_col": "Marathi", "lang_code": "mar_Deva", "needs_new_tag": false}
   }
 }

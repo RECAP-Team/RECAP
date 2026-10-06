@@ -1,0 +1,29 @@
+#!/bin/sh
+#PBS -N it2_bhili_en2tgt
+#PBS -P misn.mota2.spons
+#PBS -q standard
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=16:ngpus=1
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/indictrans2_finetune
+
+source ~/.bashrc
+conda activate mt5
+
+# Bhili, English->Bhili only, 1 GPU -- uses base_model_en_indic
+# (ai4bharat/indictrans2-en-indic-1B), not the indic-indic model the
+# Hindi-direction jobs use. 1-GPU requests queue faster than the 2-GPU
+# Hindi-direction jobs, so each of the 6 English-direction jobs
+# (Bhili/Mundari/Gondi x en2tgt/tgt2en) gets its own single-GPU script.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python finetune_indictrans2.py \
+    --server pragya \
+    --langs Bhili \
+    --directions en2tgt

@@ -5,6 +5,15 @@ running one job per GPU in parallel (a fixed-size worker pool pulls from a
 job queue -- works whether you request exactly as many GPUs as jobs, fewer,
 or more).
 
+English directions (en2tgt/tgt2en, Bhili/Mundari/Gondi only -- Marathi has
+no "en_col" in config.json) use AI4Bharat's separate en-indic/indic-en 1B
+checkpoints instead of indic-indic (IndicTrans2 ships three
+direction-specific models, not one that covers every pair) -- see
+"base_model_en_indic"/"base_model_indic_en" in config.json's per-server
+block, and run_job()'s base_model selection. Everything else (LoRA recipe,
+Bhili's add_bhili_tag() vocab patch, resumability, GPU pool) is identical
+across all four directions.
+
 Resumable: if a job is killed partway (walltime, preemption, crash), rerun
 the exact same command -- run_job() checks for a finished adapter first
 (skips outright if found) and otherwise for the latest HF Trainer
@@ -106,31 +115,40 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 HIN_CODE = "hin_Deva"
-DIRECTIONS = ["hi2tgt", "tgt2hi"]
+EN_CODE = "eng_Latn"
+DIRECTIONS = ["hi2tgt", "tgt2hi", "en2tgt", "tgt2en"]
 
 
 # =============================================================
 # 1. Data loading -- same CSVs (and cleaning) as mt5_finetune.py/nllb_finetune.py
 # =============================================================
-def load_csv_pair(csv_path, hi_col, tgt_col):
+def load_csv_pair(csv_path, cols):
     df = pd.read_csv(csv_path)
-    assert hi_col in df.columns and tgt_col in df.columns, \
-        f"{csv_path}: need columns {hi_col!r},{tgt_col!r}, got {list(df.columns)}"
-    df = df[[hi_col, tgt_col]].dropna()
-    for c in (hi_col, tgt_col):
+    assert all(c in df.columns for c in cols), \
+        f"{csv_path}: need columns {cols}, got {list(df.columns)}"
+    df = df[cols].dropna()
+    for c in cols:
         df[c] = df[c].astype(str).str.strip()
-    df = df[(df[hi_col] != "") & (df[tgt_col] != "")]
-    return df[hi_col].tolist(), df[tgt_col].tolist()
+        df = df[df[c] != ""]
+    return [df[c].tolist() for c in cols]
 
 
-def load_train_val_lines(cfg):
-    """Returns (train_hi, train_tgt, val_hi, val_tgt) from each language's
-    presplit "train_csv" + "val_csv" (RECAP/datasets/<Lang>/*.csv for all
-    four languages, incl. Marathi now that it's laid out the same way)."""
-    hi_col, tgt_col = cfg["hi_col"], cfg["csv_col"]
-    train_hi, train_tgt = load_csv_pair(cfg["train_csv"], hi_col, tgt_col)
-    val_hi, val_tgt = load_csv_pair(cfg["val_csv"], hi_col, tgt_col)
-    return train_hi, train_tgt, val_hi, val_tgt
+def load_train_val_lines(cfg, direction):
+    """Returns (train_first, train_tgt, val_first, val_tgt) from each
+    language's presplit "train_csv" + "val_csv". "first" is the Hindi
+    column for hi2tgt/tgt2hi jobs, or the English column ("en_col") for
+    en2tgt/tgt2en jobs -- make_dataset() below picks which side is actually
+    source vs. label based on `direction`. English directions need
+    cfg["en_col"] present (Bhili/Mundari/Gondi have it; Marathi doesn't, so
+    it's out of scope for en2tgt/tgt2en -- see config.json)."""
+    tgt_col = cfg["csv_col"]
+    if direction in ("en2tgt", "tgt2en"):
+        first_col = cfg["en_col"]
+    else:
+        first_col = cfg["hi_col"]
+    train_first, train_tgt = load_csv_pair(cfg["train_csv"], [first_col, tgt_col])
+    val_first, val_tgt = load_csv_pair(cfg["val_csv"], [first_col, tgt_col])
+    return train_first, train_tgt, val_first, val_tgt
 
 
 def resolve_lang_cfg(languages, server_cfg):
@@ -201,15 +219,23 @@ def add_bhili_tag(model, tokenizer, new_tag="bhb_Deva", donor_tag=HIN_CODE):
 #    (via load_train_val_lines() above) instead of one-sentence-per-line
 #    files.
 # =============================================================
-def make_dataset(hi_lines, tgt_lines, direction, lang_code, tokenizer, processor, args, seed=42):
+def make_dataset(first_lines, tgt_lines, direction, lang_code, tokenizer, processor, args, seed=42):
     from datasets import Dataset
 
+    # "first_lines" is Hindi for hi2tgt/tgt2hi, English for en2tgt/tgt2en --
+    # see load_train_val_lines().
     if direction == "hi2tgt":
-        src_lines, label_lines = hi_lines, tgt_lines
+        src_lines, label_lines = first_lines, tgt_lines
         src_code, dst_code = HIN_CODE, lang_code
-    else:  # tgt2hi
-        src_lines, label_lines = tgt_lines, hi_lines
+    elif direction == "tgt2hi":
+        src_lines, label_lines = tgt_lines, first_lines
         src_code, dst_code = lang_code, HIN_CODE
+    elif direction == "en2tgt":
+        src_lines, label_lines = first_lines, tgt_lines
+        src_code, dst_code = EN_CODE, lang_code
+    else:  # tgt2en
+        src_lines, label_lines = tgt_lines, first_lines
+        src_code, dst_code = lang_code, EN_CODE
 
     data = {
         "sentence_SRC": processor.preprocess_batch(src_lines, src_lang=src_code, tgt_lang=dst_code, is_target=False),
@@ -276,10 +302,18 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
 
     cfg = lang_cfg[lang]
     lang_code = cfg["lang_code"]
+    # Each direction needs its own IndicTrans2 base checkpoint -- indic-indic
+    # for Hindi<->tgt, en-indic for English->tgt, indic-en for tgt->English
+    # (AI4Bharat ships these as three separate models, not one that covers
+    # every direction).
+    base_model = {
+        "hi2tgt": args.base_model, "tgt2hi": args.base_model,
+        "en2tgt": args.base_model_en_indic, "tgt2en": args.base_model_indic_en,
+    }[direction]
     suffix = "-smoketest" if args.smoke_test else ""
     output_dir = str(Path(args.output_root) / lang / f"indictrans2-{lang.lower()}-{direction}-lora{suffix}")
     print(f"\n===== {tag}{' [SMOKE TEST]' if args.smoke_test else ''} =====")
-    print(f"  base model: {args.base_model}")
+    print(f"  base model: {base_model}")
     print(f"  output    : {output_dir}")
 
     # Whole job already finished in a previous run (final adapter present)?
@@ -299,22 +333,22 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
 
     print(f"{tag} loading base model + tokenizer ...")
     model = AutoModelForSeq2SeqLM.from_pretrained(
-        args.base_model, trust_remote_code=True, attn_implementation="eager",
+        base_model, trust_remote_code=True, attn_implementation="eager",
         dropout=args.dropout,
     ).to(device_tag)
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
     processor = IndicProcessor(inference=False)
 
     if cfg["needs_new_tag"]:
         add_bhili_tag(model, tokenizer, new_tag=lang_code, donor_tag=HIN_CODE)
 
     print(f"{tag} loading data ({cfg['train_csv']}) ...")
-    train_hi, train_tgt, val_hi, val_tgt = load_train_val_lines(cfg)
+    train_first, train_tgt, val_first, val_tgt = load_train_val_lines(cfg, direction)
     if args.smoke_test:
-        train_hi, train_tgt = train_hi[:args.smoke_train_rows], train_tgt[:args.smoke_train_rows]
-        val_hi, val_tgt = val_hi[:args.smoke_val_rows], val_tgt[:args.smoke_val_rows]
-    train_ds = make_dataset(train_hi, train_tgt, direction, lang_code, tokenizer, processor, args)
-    eval_ds = make_dataset(val_hi, val_tgt, direction, lang_code, tokenizer, processor, args)
+        train_first, train_tgt = train_first[:args.smoke_train_rows], train_tgt[:args.smoke_train_rows]
+        val_first, val_tgt = val_first[:args.smoke_val_rows], val_tgt[:args.smoke_val_rows]
+    train_ds = make_dataset(train_first, train_tgt, direction, lang_code, tokenizer, processor, args)
+    eval_ds = make_dataset(val_first, val_tgt, direction, lang_code, tokenizer, processor, args)
     print(f"{tag} train={len(train_ds)}  val={len(eval_ds)}")
 
     data_collator = IndicDataCollator(
@@ -514,12 +548,20 @@ def main():
         f"unknown --server {args.server!r}, choices: {list(cfg['servers'])} (edit config.json to add more)"
     server_cfg = cfg["servers"][args.server]
     args.base_model = server_cfg["base_model"]
+    args.base_model_en_indic = server_cfg.get("base_model_en_indic")
+    args.base_model_indic_en = server_cfg.get("base_model_indic_en")
     args.output_root = server_cfg["output_root"]
     lang_cfg = resolve_lang_cfg(cfg["languages"], server_cfg)
     print(f"[server] {args.server!r}: base_model={args.base_model}  data_root={server_cfg['data_root']}  output_root={args.output_root}")
 
     langs = [l.strip() for l in args.langs.split(",") if l.strip()]
     directions = [d.strip() for d in args.directions.split(",") if d.strip()]
+    if "en2tgt" in directions:
+        assert args.base_model_en_indic, \
+            f"--directions includes en2tgt but server {args.server!r} has no 'base_model_en_indic' in config.json"
+    if "tgt2en" in directions:
+        assert args.base_model_indic_en, \
+            f"--directions includes tgt2en but server {args.server!r} has no 'base_model_indic_en' in config.json"
     jobs = build_jobs(lang_cfg, langs, directions)
     print(f"[jobs] {len(jobs)} total: {jobs}")
 
