@@ -173,6 +173,7 @@ sarvam_finetune/all_sarvam_scores*.csv
 
 # spBLEU_scores/ -- keep compute_spbleu_scores.py, ignore its generated output CSVs
 spBLEU_scores/*_scores.csv
+spBLEU_scores/final_avg/*_scores.csv
 
 # sentence_spBLEU_scores/ -- same, for the sentence-level-averaged variant
 sentence_spBLEU_scores/*_scores.csv
