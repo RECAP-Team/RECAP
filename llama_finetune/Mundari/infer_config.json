@@ -34,41 +34,5 @@
     "tgt_col": "Mundari",
     "src_name": "Hindi",
     "tgt_name": "Mundari"
-  },
-  {
-    "name": "mundari_tgt2en_val",
-    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/val.csv",
-    "checkpoint_path": "./tgt2en/llama-mundari-tgt2en-finetuned",
-    "src_col": "Mundari",
-    "tgt_col": "English",
-    "src_name": "Mundari",
-    "tgt_name": "English"
-  },
-  {
-    "name": "mundari_tgt2en_test",
-    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/test.csv",
-    "checkpoint_path": "./tgt2en/llama-mundari-tgt2en-finetuned",
-    "src_col": "Mundari",
-    "tgt_col": "English",
-    "src_name": "Mundari",
-    "tgt_name": "English"
-  },
-  {
-    "name": "mundari_tgt2hi_val",
-    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/val.csv",
-    "checkpoint_path": "./tgt2hi/llama-mundari-tgt2hi-finetuned",
-    "src_col": "Mundari",
-    "tgt_col": "Hindi",
-    "src_name": "Mundari",
-    "tgt_name": "Hindi"
-  },
-  {
-    "name": "mundari_tgt2hi_test",
-    "csv_path": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/datasets/Mundari/test.csv",
-    "checkpoint_path": "./tgt2hi/llama-mundari-tgt2hi-finetuned",
-    "src_col": "Mundari",
-    "tgt_col": "Hindi",
-    "src_name": "Mundari",
-    "tgt_name": "Hindi"
   }
 ]
