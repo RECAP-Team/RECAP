@@ -177,3 +177,7 @@ spBLEU_scores/final_avg/*_scores.csv
 
 # sentence_spBLEU_scores/ -- same, for the sentence-level-averaged variant
 sentence_spBLEU_scores/*_scores.csv
+
+# statistical_analysis/ -- keep compute_statistical_significance.py, ignore generated CSVs
+statistical_analysis/*_significance.csv
+statistical_analysis/all_significance_results.csv
