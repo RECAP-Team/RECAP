@@ -194,3 +194,4 @@ human_evaluation/*_analysis/
 # human_evaluation/ -- 50-sample (shared-across-directions) variant
 human_evaluation/_work_50/
 human_evaluation/50samples/
+human_evaluation/50samples/
