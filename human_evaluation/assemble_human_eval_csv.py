@@ -124,13 +124,14 @@ project's 4 models / 2 languages / 4 directions.
   veryhigh=5).
 
 ## Error type categories
-TODO -- finalize with annotators before distributing. Candidate starting
-list (from the reference paper's own qualitative findings, Section 5.2):
+Annotators choose one (or "None" if the translation has no error) per
+translation:
+  - Mistranslation
+  - Omission
+  - Addition / Hallucination
+  - Grammar
   - Language Mixing
-  - Hallucination / Omission
-  - Polysemy / Lexical Ambiguity
-  - Domain-Specific Translation Failure
-  - (add/replace as needed for {lang})
+  - Fluency
 
 ## Generation details
 - Beam size 4 (num_beams=4), same as every model's real benchmark
