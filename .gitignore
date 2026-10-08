@@ -190,3 +190,7 @@ human_evaluation/*_human_eval_KEY.csv
 human_evaluation/*_human_eval_metrics.csv
 human_evaluation/*_README.md
 human_evaluation/*_analysis/
+
+# human_evaluation/ -- 50-sample (shared-across-directions) variant
+human_evaluation/_work_50/
+human_evaluation/50samples/
