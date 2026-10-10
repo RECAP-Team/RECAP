@@ -23,13 +23,9 @@ direction) combinations among the models currently in scope, mirroring the
 paper's own approach of using its strongest/main system (NLLB-200) as the
 reference every other model is compared against.
 
-Models currently in scope (4): NLLB, mT5, Qwen -- compared against the
-Sarvam baseline. IndicTrans2 is commented out in MODELS below until its
-English-direction checkpoints exist (it also uses a different
-file-layout -- see get_preds_path()); uncomment that one line and rerun for
-the full 5-model sweep once available. No other code change needed -- a
-(language, direction) IndicTrans2 has no data for (en2tgt/tgt2en) is simply
-skipped with a printed warning, same as any other missing file.
+Models in scope (5): NLLB, mT5, Qwen, IndicTrans2 -- compared against the
+Sarvam baseline. Any (language, direction) a model has no data for is
+simply skipped with a printed warning, same as any other missing file.
 
 p-value: two-tailed, estimated from the 1,000-sample bootstrap distribution
 of (other_model - baseline) differences as 2 * min(P(diff <= 0),
@@ -85,10 +81,7 @@ MODELS = [
     ("NLLB",          "NLLB-finetune", "nested_lang_split"),
     ("mT5",           "mt5_finetune",  "nested_lang_split"),
     ("Qwen2.5-0.5B",  "qwen_finetune", "nested_lang_split"),
-    # Uncomment once IndicTrans2's English-direction checkpoints exist
-    # (hi2tgt/tgt2hi only -- en2tgt/tgt2en rows are skipped automatically
-    # for it, same as any other missing file):
-    # ("IndicTrans2", "indictrans2_finetune", "flat_no_split"),
+    ("IndicTrans2",   "indictrans2_finetune", "flat_no_split"),
 ]
 
 
