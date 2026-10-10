@@ -5,11 +5,11 @@ methodology as compute_sentence_spbleu_scores.py (this directory's sibling
 script for mT5/NLLB/Qwen/Llama/Sarvam), but IndicTrans2 uses a DIFFERENT
 inference-output convention (per infer_indictrans2.py):
     indictrans2_finetune/infer_predictions_<lang>_<direction>.csv
-    columns: source_hindi/source_<lang>, prediction, reference_<lang>/reference_hindi
+    columns: source_hindi/source_english/source_<lang>, prediction,
+             reference_hindi/reference_english/reference_<lang>
 -- no per-language subdirectory, no val/test split suffix (infer_indictrans2.py
-only ever runs on test.csv, there is no val inference), and only 2
-directions (hi2tgt, tgt2hi -- IndicTrans2 has no English-pair directions,
-and at the time of writing only the Hindi-direction checkpoints exist).
+only ever runs on test.csv, there is no val inference). Covers all 4
+directions (hi2tgt, tgt2hi, en2tgt, tgt2en).
 
 Standalone (no imports from the other scripts). Covers Bhili/Mundari/Gondi
 only (no Marathi). A (language, direction) whose prediction file doesn't
@@ -33,7 +33,16 @@ from sacrebleu.metrics import BLEU, CHRF
 
 HERE = Path(__file__).resolve().parent
 LANGUAGES = ["Bhili", "Mundari", "Gondi"]
-DIRECTIONS = ["hi2tgt", "tgt2hi"]  # IndicTrans2 only -- see module docstring
+DIRECTIONS = ["hi2tgt", "tgt2hi", "en2tgt", "tgt2en"]
+
+# Reference column per direction, matching infer_indictrans2.py's own
+# ref_col_name convention exactly.
+REF_COL_BY_DIRECTION = {
+    "hi2tgt": lambda lang: f"reference_{lang.lower()}",
+    "tgt2hi": lambda lang: "reference_hindi",
+    "en2tgt": lambda lang: f"reference_{lang.lower()}",
+    "tgt2en": lambda lang: "reference_english",
+}
 
 # Built once, reused for every sentence -- see module docstring.
 # effective_order=True is sacrebleu's own recommended setting specifically
@@ -63,9 +72,7 @@ def score_model(indictrans2_root):
                 print(f"[skip] {lang}/{direction}: not found ({preds_path})")
                 continue
             df = pd.read_csv(preds_path)
-            # hi2tgt -> reference_<lang>; tgt2hi -> reference_hindi (per
-            # infer_indictrans2.py's own src_col_name/ref_col_name convention)
-            ref_col = f"reference_{lang.lower()}" if direction == "hi2tgt" else "reference_hindi"
+            ref_col = REF_COL_BY_DIRECTION[direction](lang)
             if ref_col not in df.columns:
                 print(f"[skip] {lang}/{direction}: no reference column {ref_col!r} in {preds_path}")
                 continue
