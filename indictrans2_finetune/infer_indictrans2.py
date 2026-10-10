@@ -44,7 +44,7 @@ os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 import pandas as pd
 
 from finetune_indictrans2 import (
-    HERE, HIN_CODE, DIRECTIONS,
+    HERE, HIN_CODE, EN_CODE, DIRECTIONS,
     resolve_lang_cfg, build_jobs, add_bhili_tag,
 )
 
@@ -91,6 +91,15 @@ def run_job(lang, direction, gpu_id, args, lang_cfg, lock=None):
     job_name = f"{lang.lower()}_{direction}"
     train_output_dir = str(Path(args.finetune_root) / lang / f"indictrans2-{lang.lower()}-{direction}-lora")
 
+    # Each direction needs its own IndicTrans2 base checkpoint -- indic-indic
+    # for Hindi<->tgt, en-indic for English->tgt, indic-en for tgt->English
+    # (AI4Bharat ships these as three separate models, not one that covers
+    # every direction) -- same selection as finetune_indictrans2.py's run_job().
+    base_model = {
+        "hi2tgt": args.base_model, "tgt2hi": args.base_model,
+        "en2tgt": args.base_model_en_indic, "tgt2en": args.base_model_indic_en,
+    }[direction]
+
     # Prefer a finished top-level adapter (model.save_pretrained ran
     # normally at the end of training); otherwise fall back to the latest
     # checkpoint-N/ (job was killed mid-training -- walltime, preemption).
@@ -102,27 +111,36 @@ def run_job(lang, direction, gpu_id, args, lang_cfg, lock=None):
             f"{tag} no finished adapter or checkpoint-N/ found under {train_output_dir}"
 
     print(f"\n===== {tag} =====")
-    print(f"  base model: {args.base_model}")
+    print(f"  base model: {base_model}")
     print(f"  adapter   : {checkpoint_path}")
 
     preds_path = Path(args.output_dir) / f"infer_predictions_{job_name}.csv"
 
     test_csv = str(Path(args.data_root) / cfg["dir_name"] / "test.csv")
-    hi_col, tgt_col = cfg["hi_col"], cfg["csv_col"]
+    tgt_col = cfg["csv_col"]
+    first_col = cfg["en_col"] if direction in ("en2tgt", "tgt2en") else cfg["hi_col"]
     df = pd.read_csv(test_csv)
-    df = df[[hi_col, tgt_col]].dropna()
-    for c in (hi_col, tgt_col):
+    df = df[[first_col, tgt_col]].dropna()
+    for c in (first_col, tgt_col):
         df[c] = df[c].astype(str).str.strip()
-    df = df[(df[hi_col] != "") & (df[tgt_col] != "")].reset_index(drop=True)
+    df = df[(df[first_col] != "") & (df[tgt_col] != "")].reset_index(drop=True)
 
     if direction == "hi2tgt":
-        src_lines, ref_lines = df[hi_col].tolist(), df[tgt_col].tolist()
+        src_lines, ref_lines = df[first_col].tolist(), df[tgt_col].tolist()
         src_code, dst_code = HIN_CODE, lang_code
         src_col_name, ref_col_name = "source_hindi", f"reference_{lang.lower()}"
-    else:  # tgt2hi
-        src_lines, ref_lines = df[tgt_col].tolist(), df[hi_col].tolist()
+    elif direction == "tgt2hi":
+        src_lines, ref_lines = df[tgt_col].tolist(), df[first_col].tolist()
         src_code, dst_code = lang_code, HIN_CODE
         src_col_name, ref_col_name = f"source_{lang.lower()}", "reference_hindi"
+    elif direction == "en2tgt":
+        src_lines, ref_lines = df[first_col].tolist(), df[tgt_col].tolist()
+        src_code, dst_code = EN_CODE, lang_code
+        src_col_name, ref_col_name = "source_english", f"reference_{lang.lower()}"
+    else:  # tgt2en
+        src_lines, ref_lines = df[tgt_col].tolist(), df[first_col].tolist()
+        src_code, dst_code = lang_code, EN_CODE
+        src_col_name, ref_col_name = f"source_{lang.lower()}", "reference_english"
     total_rows = len(src_lines)
     print(f"{tag} rows to translate: {total_rows}")
 
@@ -137,9 +155,9 @@ def run_job(lang, direction, gpu_id, args, lang_cfg, lock=None):
     else:
         print(f"{tag} loading base model + tokenizer ...")
         model = AutoModelForSeq2SeqLM.from_pretrained(
-            args.base_model, trust_remote_code=True, attn_implementation="eager",
+            base_model, trust_remote_code=True, attn_implementation="eager",
         ).to(device_tag)
-        tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
 
         if cfg["needs_new_tag"]:
             # Must resize the embedding table the same way training did
@@ -246,6 +264,8 @@ def main():
         f"unknown --server {args.server!r}, choices: {list(cfg['servers'])}"
     server_cfg = cfg["servers"][args.server]
     args.base_model = server_cfg["base_model"]
+    args.base_model_en_indic = server_cfg.get("base_model_en_indic")
+    args.base_model_indic_en = server_cfg.get("base_model_indic_en")
     args.data_root = server_cfg["data_root"]
     args.finetune_root = server_cfg["output_root"]  # where finetune_indictrans2.py wrote checkpoints
     lang_cfg = resolve_lang_cfg(cfg["languages"], server_cfg)
@@ -254,6 +274,12 @@ def main():
 
     langs = [l.strip() for l in args.langs.split(",") if l.strip()]
     directions = [d.strip() for d in args.directions.split(",") if d.strip()]
+    if "en2tgt" in directions:
+        assert args.base_model_en_indic, \
+            f"--directions includes en2tgt but server {args.server!r} has no 'base_model_en_indic' in config.json"
+    if "tgt2en" in directions:
+        assert args.base_model_indic_en, \
+            f"--directions includes tgt2en but server {args.server!r} has no 'base_model_indic_en' in config.json"
     jobs = build_jobs(lang_cfg, langs, directions)
     print(f"[jobs] {len(jobs)} total: {jobs}")
 
