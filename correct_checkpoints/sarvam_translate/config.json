@@ -1,0 +1,8 @@
+{
+  "base_model": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/Sarvam-Translate",
+  "data_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/dataset_corrected",
+  "output_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/sarvam_translate",
+  "languages": {
+    "bhili": {"dir_name": "bhili", "tgt_col": "Bhili", "en_col": "English"}
+  }
+}

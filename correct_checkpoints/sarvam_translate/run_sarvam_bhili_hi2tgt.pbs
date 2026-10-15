@@ -1,0 +1,25 @@
+#!/bin/sh
+#PBS -N sarvam_bhili_corrected_hi2tgt
+#PBS -P misn.mota2.spons
+#PBS -q standard
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=16:ngpus=1
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/sarvam_translate
+
+source ~/.bashrc
+conda activate sarvam
+
+# Bhili hi2tgt on the CORRECTED dataset (correct_checkpoints/dataset_corrected/bhili/)
+# -- 1 direction, 1 GPU. See config.json for data/output paths.
+/home/scai/msr/aiy257590/.conda/envs/sarvam/bin/python sarvam_finetune.py \
+    --langs bhili \
+    --directions hi2tgt

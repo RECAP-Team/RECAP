@@ -1,0 +1,507 @@
+"""
+Full fine-tune sarvamai/sarvam-translate for Hindi<->Bhili (hi2tgt/tgt2hi)
+and English<->Bhili (en2tgt/tgt2en), on the CORRECTED Bhili data produced by
+the dataset-cleanup pass (see correct_checkpoints/dataset_corrected/bhili/
+{train,val,test}.csv and Removed_Rows_Report.pdf for what was fixed:
+untranslated-English removal, duplicate-row removal, one-to-many capping,
+placeholder-translation removal, and a leakage-free train/val/test split).
+
+This is a self-contained copy of sarvam_finetune/sarvam_finetune.py, adapted
+to read/write under correct_checkpoints/ instead of the original
+sarvam_finetune/ tree, so this corrected-data re-run cannot interfere with
+anything already running against the original pipeline. The only functional
+addition vs. the original script is saving a training-log JSON/CSV and a
+loss-curve PNG per job (see save_training_logs_and_plot()) -- everything
+else (data loading, prompt format, training recipe, scoring) is unchanged.
+
+Prompt format matches Sarvam-Translate's own documented usage exactly:
+    system: "Translate the text below to {tgt_name}."
+    user:   <source text, verbatim>
+    assistant: <target text>
+Loss is computed only on the assistant's response tokens (prompt masked
+with label id -100).
+
+Resumable: a job already fully saved is skipped outright; a job that got
+partway through resumes from its last HF Trainer checkpoint.
+
+Run (auto-detects GPU count):
+    python sarvam_finetune.py --langs bhili --directions hi2tgt
+    python sarvam_finetune.py --langs bhili --directions hi2tgt,tgt2hi,en2tgt,tgt2en
+    python sarvam_finetune.py --smoke_test   # tiny slice, few steps, fast
+
+Config (correct_checkpoints/sarvam_translate/config.json, same directory):
+    {
+      "base_model": ".../RECAP/Models/Sarvam-Translate",
+      "data_root": ".../RECAP/correct_checkpoints/dataset_corrected",
+      "output_root": ".../RECAP/correct_checkpoints/sarvam_translate",
+      "languages": {
+        "bhili": {"dir_name": "bhili", "tgt_col": "Bhili", "en_col": "English"}
+      }
+    }
+"""
+
+import os
+import csv
+import json
+import argparse
+import multiprocessing as mp
+from pathlib import Path
+
+os.environ.setdefault("WANDB_MODE", "disabled")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+os.environ.setdefault("MPLBACKEND", "Agg")
+
+import pandas as pd
+
+HERE = Path(__file__).resolve().parent
+HIN_NAME = "Hindi"
+ENG_NAME = "English"
+DIRECTIONS = ["hi2tgt", "tgt2hi", "en2tgt", "tgt2en"]
+
+
+# =============================================================
+# 1. Data loading -- same CSVs (and cleaning) as the other tribal finetunes
+# =============================================================
+def load_csv_pair(csv_path, hi_col, tgt_col):
+    df = pd.read_csv(csv_path)
+    assert hi_col in df.columns and tgt_col in df.columns, \
+        f"{csv_path}: need columns {hi_col!r},{tgt_col!r}, got {list(df.columns)}"
+    df = df[[hi_col, tgt_col]].dropna()
+    for c in (hi_col, tgt_col):
+        df[c] = df[c].astype(str).str.strip()
+    df = df[(df[hi_col] != "") & (df[tgt_col] != "")]
+    return df[hi_col].tolist(), df[tgt_col].tolist()
+
+
+def load_splits(cfg, direction):
+    """Returns (train_src,train_tgt), (val_src,val_tgt), (test_src,test_tgt),
+    tgt_name for this direction -- src/tgt column order and the generation
+    target's display name already resolved, so run_job() doesn't need its
+    own direction branching."""
+    tgt_col = cfg["tgt_col"]
+    if direction in ("hi2tgt", "tgt2hi"):
+        other_col, other_name = HIN_NAME, HIN_NAME
+    else:  # en2tgt, tgt2en
+        assert "en_col" in cfg, \
+            f"{direction} needs an 'en_col' in config.json for this language -- not supported here"
+        other_col, other_name = cfg["en_col"], ENG_NAME
+
+    if direction in ("hi2tgt", "en2tgt"):
+        src_col, lbl_col, tgt_name = other_col, tgt_col, tgt_col
+    else:  # tgt2hi, tgt2en
+        src_col, lbl_col, tgt_name = tgt_col, other_col, other_name
+
+    train_src, train_lbl = load_csv_pair(cfg["train_csv"], src_col, lbl_col)
+    val_src, val_lbl = load_csv_pair(cfg["val_csv"], src_col, lbl_col)
+    test_src, test_lbl = load_csv_pair(cfg["test_csv"], src_col, lbl_col)
+    return (train_src, train_lbl), (val_src, val_lbl), (test_src, test_lbl), tgt_name
+
+
+def build_jobs(languages_cfg, langs, directions):
+    jobs = []
+    for lang in langs:
+        assert lang in languages_cfg, f"unknown language {lang!r}, choices: {list(languages_cfg)}"
+        for direction in directions:
+            assert direction in DIRECTIONS, f"unknown direction {direction!r}, choices: {DIRECTIONS}"
+            if direction in ("en2tgt", "tgt2en"):
+                assert "en_col" in languages_cfg[lang], \
+                    f"{lang} has no 'en_col' in config.json -- English directions unsupported for it"
+            jobs.append((lang, direction))
+    return jobs
+
+
+# =============================================================
+# 2. Prompt formatting + preprocessing (response-only loss masking)
+#    Matches Sarvam-Translate's own documented chat format exactly.
+# =============================================================
+def build_messages(tgt_name, src_text, tgt_text=None):
+    messages = [
+        {"role": "system", "content": f"Translate the text below to {tgt_name}."},
+        {"role": "user", "content": str(src_text)},
+    ]
+    if tgt_text is not None:
+        messages.append({"role": "assistant", "content": str(tgt_text)})
+    return messages
+
+
+def make_preprocess_fn(tokenizer, tgt_name, max_length):
+    def preprocess_function(examples):
+        all_input_ids, all_labels, all_attention_mask = [], [], []
+        for src_text, tgt_text in zip(examples["src"], examples["tgt"]):
+            prompt_text = tokenizer.apply_chat_template(
+                build_messages(tgt_name, src_text), tokenize=False, add_generation_prompt=True)
+            full_text = tokenizer.apply_chat_template(
+                build_messages(tgt_name, src_text, tgt_text), tokenize=False, add_generation_prompt=False)
+
+            prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
+            full_ids = tokenizer(full_text, add_special_tokens=False)["input_ids"]
+            labels = [-100] * len(prompt_ids) + full_ids[len(prompt_ids):]
+
+            if len(full_ids) > max_length:
+                overflow = len(full_ids) - max_length
+                full_ids = full_ids[overflow:]
+                labels = labels[overflow:]
+
+            all_input_ids.append(full_ids)
+            all_labels.append(labels)
+            all_attention_mask.append([1] * len(full_ids))
+        return {"input_ids": all_input_ids, "labels": all_labels, "attention_mask": all_attention_mask}
+    return preprocess_function
+
+
+class CausalLMPaddingCollator:
+    """Pads pre-tokenized input_ids/labels/attention_mask to the batch max
+    length. Labels are already response-only-masked (-100 on prompt
+    tokens) by make_preprocess_fn -- this collator only pads."""
+
+    def __init__(self, pad_token_id):
+        self.pad_token_id = pad_token_id
+
+    def __call__(self, features):
+        max_len = max(len(f["input_ids"]) for f in features)
+        input_ids, attention_mask, labels = [], [], []
+        for f in features:
+            pad_len = max_len - len(f["input_ids"])
+            input_ids.append(f["input_ids"] + [self.pad_token_id] * pad_len)
+            attention_mask.append(f["attention_mask"] + [0] * pad_len)
+            labels.append(f["labels"] + [-100] * pad_len)
+        import torch
+        return {
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),
+            "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
+            "labels": torch.tensor(labels, dtype=torch.long),
+        }
+
+
+# =============================================================
+# 3. Generation-based scoring (real model.generate(), BLEU + chrF++)
+# =============================================================
+def generate_and_score(src_texts, ref_texts, tgt_name, model, tokenizer, device,
+                        max_new_tokens, num_beams=2, batch_size=16):
+    import torch
+    model.eval()
+    tokenizer.padding_side = "left"  # required for correct batched causal-LM generation
+
+    end_of_turn_id = tokenizer.convert_tokens_to_ids("<end_of_turn>")
+    eos_ids = [tokenizer.eos_token_id, end_of_turn_id]
+
+    all_preds = []
+    with torch.no_grad():
+        for i in range(0, len(src_texts), batch_size):
+            chunk = src_texts[i:i + batch_size]
+            prompts = [
+                tokenizer.apply_chat_template(
+                    build_messages(tgt_name, t), tokenize=False, add_generation_prompt=True)
+                for t in chunk
+            ]
+            enc = tokenizer(
+                prompts, return_tensors="pt", padding=True, truncation=True,
+                max_length=2048, add_special_tokens=False,
+            ).to(device)
+            out = model.generate(
+                **enc, max_new_tokens=max_new_tokens, num_beams=num_beams,
+                eos_token_id=eos_ids, pad_token_id=tokenizer.pad_token_id,
+            )
+            gen_only = out[:, enc["input_ids"].shape[1]:]
+            decoded = tokenizer.batch_decode(gen_only, skip_special_tokens=True)
+            all_preds.extend(p.strip() for p in decoded)
+            if (i // batch_size) % 20 == 0:
+                print(f"  decoded {i + len(chunk)}/{len(src_texts)}")
+
+    tokenizer.padding_side = "right"  # restore training-time default
+
+    import sacrebleu
+    bleu = sacrebleu.corpus_bleu(all_preds, [ref_texts]).score
+    chrfpp = sacrebleu.corpus_chrf(all_preds, [ref_texts], word_order=2).score
+    return all_preds, bleu, chrfpp
+
+
+def append_master_scores(scores_csv, lang, direction, val_loss, val_bleu, val_chrf, test_bleu, test_chrf):
+    header = ["language", "direction", "val_loss", "val_bleu_beam4", "val_chrf++_beam4",
+              "test_bleu_beam4", "test_chrf++_beam4"]
+    row = [lang, direction, f"{val_loss:.4f}", f"{val_bleu:.4f}", f"{val_chrf:.4f}",
+           f"{test_bleu:.4f}", f"{test_chrf:.4f}"]
+    is_new = not Path(scores_csv).exists()
+    with open(scores_csv, "a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        if is_new:
+            w.writerow(header)
+        w.writerow(row)
+    print(f"[Scores] Appended '{lang}/{direction}' to {scores_csv}")
+
+
+def save_training_logs_and_plot(log_history, output_root, lang, direction, suffix):
+    """Saves the HF Trainer's per-step log history (train loss + periodic
+    eval loss) as JSON and CSV, and renders a loss-curve PNG -- the
+    'training logs and plots' this corrected-data pipeline is asked to
+    keep, on top of what the original sarvam_finetune.py already saves
+    (checkpoints, test predictions, master scores CSV)."""
+    lang_dir = Path(output_root) / lang
+    tag = f"{lang.lower()}_{direction}{suffix}"
+
+    log_json_path = lang_dir / f"training_log_{tag}.json"
+    with open(log_json_path, "w", encoding="utf-8") as f:
+        json.dump(log_history, f, ensure_ascii=False, indent=2)
+
+    train_rows = [r for r in log_history if "loss" in r and "eval_loss" not in r]
+    eval_rows = [r for r in log_history if "eval_loss" in r]
+
+    log_csv_path = lang_dir / f"training_log_{tag}.csv"
+    with open(log_csv_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["step", "train_loss", "eval_loss", "learning_rate"])
+        steps = sorted({r.get("step") for r in train_rows + eval_rows if r.get("step") is not None})
+        train_by_step = {r["step"]: r for r in train_rows}
+        eval_by_step = {r["step"]: r for r in eval_rows}
+        for step in steps:
+            tr = train_by_step.get(step, {})
+            ev = eval_by_step.get(step, {})
+            w.writerow([step, tr.get("loss", ""), ev.get("eval_loss", ""), tr.get("learning_rate", "")])
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        if train_rows:
+            ax.plot([r["step"] for r in train_rows], [r["loss"] for r in train_rows],
+                     label="train loss", color="#1a3d6d")
+        if eval_rows:
+            ax.plot([r["step"] for r in eval_rows], [r["eval_loss"] for r in eval_rows],
+                     label="eval loss", color="#b5460a", marker="o")
+        ax.set_xlabel("step")
+        ax.set_ylabel("loss")
+        ax.set_title(f"Sarvam-Translate -- {lang}/{direction} training loss")
+        ax.legend()
+        fig.tight_layout()
+        plot_path = lang_dir / f"training_loss_plot_{tag}.png"
+        fig.savefig(plot_path, dpi=150)
+        plt.close(fig)
+        print(f"  training log/plot -> {log_json_path.name}, {log_csv_path.name}, {plot_path.name}")
+    except Exception as e:
+        print(f"  [warn] could not render loss plot ({e}); log JSON/CSV still saved")
+
+
+# =============================================================
+# 4. One finetuning job: load model fresh, train, score. Runs inside one
+#    GPU-pinned worker process (see the pool orchestration below).
+# =============================================================
+def run_job(lang, direction, gpu_id, args, lang_cfg):
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
+    from transformers.trainer_utils import get_last_checkpoint
+    from datasets import Dataset
+
+    device_tag = "cuda:0" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        torch.cuda.set_device(0)
+    tag = f"[{lang}/{direction} physical-gpu{gpu_id}]"
+
+    cfg = lang_cfg[lang]
+    suffix = "-smoketest" if args.smoke_test else ""
+    output_dir = str(Path(args.output_root) / lang / f"sarvam-{lang.lower()}-{direction}-finetuned{suffix}")
+    print(f"\n===== {tag}{' [SMOKE TEST]' if args.smoke_test else ''} =====")
+    print(f"  base model: {args.base_model}")
+    print(f"  output    : {output_dir}")
+
+    if Path(output_dir, "config.json").exists() and (
+        Path(output_dir, "model.safetensors").exists()
+        or Path(output_dir, "model.safetensors.index.json").exists()
+    ):
+        print(f"{tag} already finished -- skipping")
+        return
+
+    resume_from_checkpoint = get_last_checkpoint(output_dir) if Path(output_dir).is_dir() else None
+    if resume_from_checkpoint:
+        print(f"{tag} resuming training from {resume_from_checkpoint}")
+
+    print(f"{tag} loading data ...")
+    (train_src, train_lbl), (val_src, val_lbl), (test_src, test_lbl), tgt_name = load_splits(cfg, direction)
+
+    if args.smoke_test:
+        train_src, train_lbl = train_src[:args.smoke_train_rows], train_lbl[:args.smoke_train_rows]
+        val_src, val_lbl = val_src[:args.smoke_val_rows], val_lbl[:args.smoke_val_rows]
+        test_src, test_lbl = test_src[:args.smoke_val_rows], test_lbl[:args.smoke_val_rows]
+
+    print(f"{tag} train={len(train_src)}  val={len(val_src)}  test={len(test_src)}  (-> {tgt_name})")
+
+    print(f"{tag} loading base model + tokenizer ...")
+    tokenizer = AutoTokenizer.from_pretrained(args.base_model)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(args.base_model, torch_dtype=torch.bfloat16).to(device_tag)
+
+    pre_fn = make_preprocess_fn(tokenizer, tgt_name, args.max_length)
+    print(f"{tag} tokenizing (response-only loss masking) ...")
+    train_ds = Dataset.from_dict({"src": train_src, "tgt": train_lbl}).map(
+        pre_fn, batched=True, remove_columns=["src", "tgt"], num_proc=args.num_proc, desc="train")
+    val_ds = Dataset.from_dict({"src": val_src, "tgt": val_lbl}).map(
+        pre_fn, batched=True, remove_columns=["src", "tgt"], num_proc=args.num_proc, desc="val")
+
+    data_collator = CausalLMPaddingCollator(pad_token_id=tokenizer.pad_token_id)
+
+    # === TRAINING ARGS: full-parameter LLM SFT recipe (AdamW, small LR,
+    #     short warmup, few epochs), plus gradient checkpointing + 8-bit
+    #     AdamW (bitsandbytes) since this job is alone on its GPU with no
+    #     ZeRO sharding to fall back on. ===
+    if args.smoke_test:
+        max_steps, save_steps, eval_steps, warmup_steps, logging_steps = args.smoke_max_steps, 5, 5, 2, 1
+    else:
+        max_steps, save_steps, eval_steps, logging_steps = -1, args.save_steps, args.eval_steps, 100
+        steps_per_epoch = max(1, -(-len(train_ds) // (args.batch_size * args.grad_accum_steps)))
+        total_steps = steps_per_epoch * args.epochs
+        warmup_steps = max(1, int(0.03 * total_steps))
+
+    training_args = TrainingArguments(
+        output_dir=output_dir,
+        num_train_epochs=args.epochs,
+        max_steps=max_steps,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.grad_accum_steps,
+        gradient_checkpointing=True,
+        optim="adamw_bnb_8bit",
+        learning_rate=args.learning_rate,
+        lr_scheduler_type="cosine",
+        warmup_steps=warmup_steps,
+        eval_strategy="steps",
+        eval_steps=eval_steps,
+        save_strategy="steps",
+        save_steps=save_steps,
+        save_total_limit=1,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
+        bf16=True,
+        fp16=False,
+        max_grad_norm=1.0,
+        logging_steps=logging_steps,
+        dataloader_num_workers=0,  # this job runs inside a daemon Pool worker -- see finetune_indictrans2.py's identical note
+        report_to="none",
+        seed=42,
+    )
+
+    trainer = Trainer(
+        model=model, args=training_args, data_collator=data_collator,
+        train_dataset=train_ds, eval_dataset=val_ds,
+        processing_class=tokenizer,  # Trainer's tokenizer= kwarg was renamed processing_class= in transformers 5.x
+    )
+
+    print(f"{tag} training ...")
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+    trainer.save_model(output_dir)
+    tokenizer.save_pretrained(output_dir)
+    print(f"{tag} model saved -> {output_dir}")
+
+    save_training_logs_and_plot(trainer.state.log_history, args.output_root, lang, direction, suffix)
+
+    val_metrics = trainer.evaluate()
+    val_loss = val_metrics.get("eval_loss", float("nan"))
+    print(f"{tag} VAL loss = {val_loss:.4f}")
+
+    print(f"{tag} generating on validation set (beam={args.num_beams}) ...")
+    _, val_bleu, val_chrf = generate_and_score(
+        val_src, val_lbl, tgt_name, model, tokenizer, device_tag, args.max_new_tokens, args.num_beams)
+    print(f"{tag} VAL  BLEU={val_bleu:.4f}  chrF++={val_chrf:.4f}")
+
+    print(f"{tag} generating on test set (beam={args.num_beams}) ...")
+    test_preds, test_bleu, test_chrf = generate_and_score(
+        test_src, test_lbl, tgt_name, model, tokenizer, device_tag, args.max_new_tokens, args.num_beams)
+    print(f"{tag} TEST BLEU={test_bleu:.4f}  chrF++={test_chrf:.4f}")
+
+    preds_path = Path(args.output_root) / lang / f"test_predictions_{lang.lower()}_{direction}{suffix}.csv"
+    pd.DataFrame({"source": test_src, "reference": test_lbl, "prediction": test_preds}).to_csv(
+        preds_path, index=False, encoding="utf-8-sig")
+    print(f"{tag} predictions -> {preds_path}")
+
+    scores_csv = Path(args.output_root) / ("all_sarvam_scores_smoketest.csv" if args.smoke_test else "all_sarvam_scores.csv")
+    append_master_scores(scores_csv, lang, direction, val_loss, val_bleu, val_chrf, test_bleu, test_chrf)
+    print(f"{tag} done -> {output_dir}")
+
+
+# =============================================================
+# 5. GPU-pool orchestration -- identical pattern to
+#    indictrans2_finetune/finetune_indictrans2.py.
+# =============================================================
+_worker_gpu_id = None
+
+
+def _pool_init(gpu_queue):
+    global _worker_gpu_id
+    _worker_gpu_id = gpu_queue.get()
+    # Restrict this worker to exactly one physical GPU -- see the identical,
+    # more detailed comment in finetune_indictrans2.py's _pool_init(). Must
+    # happen before torch is ever imported in this process.
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(_worker_gpu_id)
+
+
+def _pool_run(job_args):
+    lang, direction, args, lang_cfg = job_args
+    run_job(lang, direction, _worker_gpu_id, args, lang_cfg)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default=str(HERE / "config.json"))
+    ap.add_argument("--langs", default="bhili")
+    ap.add_argument("--directions", default="hi2tgt,tgt2hi")
+    ap.add_argument("--epochs", type=int, default=3)
+    ap.add_argument("--batch_size", type=int, default=4)
+    ap.add_argument("--grad_accum_steps", type=int, default=8)
+    ap.add_argument("--learning_rate", type=float, default=2e-5)
+    ap.add_argument("--save_steps", type=int, default=900)
+    ap.add_argument("--eval_steps", type=int, default=900)
+    ap.add_argument("--max_length", type=int, default=512)
+    ap.add_argument("--max_new_tokens", type=int, default=256)
+    ap.add_argument("--num_beams", type=int, default=2)
+    ap.add_argument("--num_proc", type=int, default=4)
+    ap.add_argument("--smoke_test", action="store_true")
+    ap.add_argument("--smoke_train_rows", type=int, default=300)
+    ap.add_argument("--smoke_val_rows", type=int, default=60)
+    ap.add_argument("--smoke_max_steps", type=int, default=10)
+    args = ap.parse_args()
+
+    with open(args.config) as f:
+        cfg = json.load(f)
+    args.base_model = cfg["base_model"]
+    args.output_root = cfg["output_root"]
+    data_root = cfg["data_root"]
+
+    lang_cfg = {}
+    for lang, entry in cfg["languages"].items():
+        e = dict(entry)
+        e["train_csv"] = str(Path(data_root) / e["dir_name"] / "train.csv")
+        e["val_csv"] = str(Path(data_root) / e["dir_name"] / "val.csv")
+        e["test_csv"] = str(Path(data_root) / e["dir_name"] / "test.csv")
+        lang_cfg[lang] = e
+
+    langs = [l.strip() for l in args.langs.split(",") if l.strip()]
+    directions = [d.strip() for d in args.directions.split(",") if d.strip()]
+    jobs = build_jobs(lang_cfg, langs, directions)
+    print(f"[jobs] {len(jobs)} total: {jobs}")
+
+    import torch
+    n_gpus = torch.cuda.device_count()
+    print(f"[gpu] {n_gpus} visible")
+    if n_gpus == 0:
+        raise SystemExit("No GPU visible -- request GPUs on the job scheduler before running this.")
+
+    pool_size = min(n_gpus, len(jobs))
+    print(f"[pool] {pool_size} worker(s), {len(jobs)} job(s) queued")
+
+    ctx = mp.get_context("spawn")
+    gpu_queue = ctx.Queue()
+    for gpu_id in range(pool_size):
+        gpu_queue.put(gpu_id)
+
+    job_args = [(lang, direction, args, lang_cfg) for lang, direction in jobs]
+    with ctx.Pool(processes=pool_size, initializer=_pool_init, initargs=(gpu_queue,)) as pool:
+        pool.map(_pool_run, job_args)
+
+    print("\nAll jobs done.")
+
+
+if __name__ == "__main__":
+    main()
