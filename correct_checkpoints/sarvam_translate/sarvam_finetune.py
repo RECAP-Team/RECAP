@@ -212,16 +212,25 @@ def generate_and_score(src_texts, ref_texts, tgt_name, model, tokenizer, device,
     tokenizer.padding_side = "right"  # restore training-time default
 
     import sacrebleu
+    from sacrebleu.metrics import BLEU
     bleu = sacrebleu.corpus_bleu(all_preds, [ref_texts]).score
+    # spBLEU: same BLEU computation, but with the FLORES-200 SentencePiece
+    # tokenizer instead of the default 13a tokenizer -- the standard choice
+    # for Indic-script text (used throughout this project's other spBLEU
+    # scripts, e.g. spBLEU_scores/final_avg/compute_sentence_spbleu_*.py).
+    spbleu = BLEU(tokenize="flores200").corpus_score(all_preds, [ref_texts]).score
     chrfpp = sacrebleu.corpus_chrf(all_preds, [ref_texts], word_order=2).score
-    return all_preds, bleu, chrfpp
+    return all_preds, bleu, spbleu, chrfpp
 
 
-def append_master_scores(scores_csv, lang, direction, val_loss, val_bleu, val_chrf, test_bleu, test_chrf):
-    header = ["language", "direction", "val_loss", "val_bleu_beam4", "val_chrf++_beam4",
-              "test_bleu_beam4", "test_chrf++_beam4"]
-    row = [lang, direction, f"{val_loss:.4f}", f"{val_bleu:.4f}", f"{val_chrf:.4f}",
-           f"{test_bleu:.4f}", f"{test_chrf:.4f}"]
+def append_master_scores(scores_csv, lang, direction, val_loss,
+                          val_bleu, val_spbleu, val_chrf, test_bleu, test_spbleu, test_chrf):
+    header = ["language", "direction", "val_loss",
+              "val_bleu_beam4", "val_spbleu_beam4", "val_chrf++_beam4",
+              "test_bleu_beam4", "test_spbleu_beam4", "test_chrf++_beam4"]
+    row = [lang, direction, f"{val_loss:.4f}",
+           f"{val_bleu:.4f}", f"{val_spbleu:.4f}", f"{val_chrf:.4f}",
+           f"{test_bleu:.4f}", f"{test_spbleu:.4f}", f"{test_chrf:.4f}"]
     is_new = not Path(scores_csv).exists()
     with open(scores_csv, "a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -402,14 +411,14 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
     print(f"{tag} VAL loss = {val_loss:.4f}")
 
     print(f"{tag} generating on validation set (beam={args.num_beams}) ...")
-    _, val_bleu, val_chrf = generate_and_score(
+    _, val_bleu, val_spbleu, val_chrf = generate_and_score(
         val_src, val_lbl, tgt_name, model, tokenizer, device_tag, args.max_new_tokens, args.num_beams)
-    print(f"{tag} VAL  BLEU={val_bleu:.4f}  chrF++={val_chrf:.4f}")
+    print(f"{tag} VAL  BLEU={val_bleu:.4f}  spBLEU={val_spbleu:.4f}  chrF++={val_chrf:.4f}")
 
     print(f"{tag} generating on test set (beam={args.num_beams}) ...")
-    test_preds, test_bleu, test_chrf = generate_and_score(
+    test_preds, test_bleu, test_spbleu, test_chrf = generate_and_score(
         test_src, test_lbl, tgt_name, model, tokenizer, device_tag, args.max_new_tokens, args.num_beams)
-    print(f"{tag} TEST BLEU={test_bleu:.4f}  chrF++={test_chrf:.4f}")
+    print(f"{tag} TEST BLEU={test_bleu:.4f}  spBLEU={test_spbleu:.4f}  chrF++={test_chrf:.4f}")
 
     preds_path = Path(args.output_root) / lang / f"test_predictions_{lang.lower()}_{direction}{suffix}.csv"
     pd.DataFrame({"source": test_src, "reference": test_lbl, "prediction": test_preds}).to_csv(
@@ -417,7 +426,8 @@ def run_job(lang, direction, gpu_id, args, lang_cfg):
     print(f"{tag} predictions -> {preds_path}")
 
     scores_csv = Path(args.output_root) / ("all_sarvam_scores_smoketest.csv" if args.smoke_test else "all_sarvam_scores.csv")
-    append_master_scores(scores_csv, lang, direction, val_loss, val_bleu, val_chrf, test_bleu, test_chrf)
+    append_master_scores(scores_csv, lang, direction, val_loss,
+                          val_bleu, val_spbleu, val_chrf, test_bleu, test_spbleu, test_chrf)
     print(f"{tag} done -> {output_dir}")
 
 
