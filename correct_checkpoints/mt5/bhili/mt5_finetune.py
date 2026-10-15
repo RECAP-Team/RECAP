@@ -1,38 +1,59 @@
 """
-Fine-tune mT5-base for English/Hindi <-> {tribal language}, on the
-CORRECTED Bhili data produced by the dataset-cleanup pass (see
-correct_checkpoints/dataset_corrected/bhili/{train,val,test}.csv and
-Removed_Rows_Report.pdf for what was fixed).
+Fine-tune mT5-base for English/Hindi <-> Bhili, on the CORRECTED Bhili data
+produced by the dataset-cleanup pass (see correct_checkpoints/
+dataset_corrected/bhili/{train,val,test}.csv and Removed_Rows_Report.pdf
+for what was fixed).
 
-This is a self-contained copy of mt5_finetune/Bhili/mt5_finetune.py,
-adapted to read config.json from THIS directory (one subfolder per
-direction, matching this repo's own llama_finetune/<Lang>/<direction>/
-convention -- this script's outputs are relative-path, so a dedicated CWD
-per direction avoids 4 independently-submitted PBS jobs colliding on the
-same output files/checkpoint dirs). The only functional additions vs. the
-original script: (1) spBLEU (FLORES-200 tokenizer) alongside the existing
-BLEU everywhere BLEU is already reported, and (2) a saved training-log
-JSON/CSV + loss-curve PNG. Everything else (data loading, T5 instruction
-prefix, training recipe) is unchanged.
+This runs all 4 directions (hi2tgt, tgt2hi, en2tgt, tgt2en) IN PARALLEL on
+one multi-GPU PBS job, one direction per GPU -- same GPU-pool pattern as
+sarvam_finetune.py (a fixed-size worker pool pulls from a job queue, each
+worker pinned to exactly one physical GPU via CUDA_VISIBLE_DEVICES). Each
+direction is a fully independent single-GPU fine-tune with no cross-GPU
+communication, so this produces IDENTICAL per-direction training/results
+to running them as 4 separate single-GPU jobs -- it only changes how the
+4 runs are packaged into PBS jobs, not what each one computes.
+
+Why this needed restructuring (vs. the original mt5_finetune.py, which
+runs directions sequentially in ONE process): that script imports torch/
+transformers at module level and calls torch.manual_seed()/prints CUDA
+diagnostics immediately on import. In a multiprocessing pool, a spawned
+worker re-imports the module before the pool's initializer gets to pin
+CUDA_VISIBLE_DEVICES, so torch would already see every GPU by the time
+it's actually used. Here all CUDA-touching imports (torch, transformers,
+datasets, numpy, sacrebleu) are deferred into _lazy_imports(), called as
+the first thing inside run_direction() -- i.e. only after _pool_init() has
+already set CUDA_VISIBLE_DEVICES for that worker. This is the same
+deferred-import pattern sarvam_finetune.py already uses.
+
+Output filenames are already direction-qualified (mt5-bhili-hi2tgt-
+finetuned/, test_predictions_bhili_hi2tgt.csv, training_log_bhili_hi2tgt.*,
+etc.) so all 4 workers writing into the same working directory in parallel
+do not collide -- the only shared file is all_languages_scores.csv, which
+each worker appends to exactly once, at the very end of its own
+multi-hour run (same acceptable-risk shared-append pattern
+sarvam_finetune.py's all_sarvam_scores.csv already uses).
 
 mT5 has no NLLB-style language-code tokens / forced_bos_token_id mechanism —
 it is a plain text-to-text model, so the translation direction is expressed
 as a natural-language instruction prefix on the source text, e.g.:
-    "translate English to Gondi: <source text>"
+    "translate English to Bhili: <source text>"
 
-Language, direction, data paths, and epochs are read from config.json
-(same directory as this script):
+Config (mt5/bhili/config.json, same directory):
     {
       "language": "bhili",
-      "direction": "hi2tgt",
+      "direction": ["hi2tgt", "tgt2hi", "en2tgt", "tgt2en"],
       "epochs": 10,
       "train_csv": "...", "val_csv": "...", "test_csv": "..."
     }
+
+Run (on a PBS job with 4 GPUs requested):
+    python mt5_finetune.py
 """
 
 import os
 import json
 import csv
+import multiprocessing as mp
 from pathlib import Path
 
 # --- silence wandb / tokenizer warnings BEFORE importing torch/transformers ---
@@ -41,28 +62,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
 os.environ.setdefault("MPLBACKEND", "Agg")
 
-import numpy as np
-import pandas as pd
-import torch
-
-print("=" * 60)
-print("torch version:", torch.__version__)
-print("cuda available:", torch.cuda.is_available())
-print("device count:", torch.cuda.device_count())
-print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
-if torch.cuda.is_available():
-    print("GPU:", torch.cuda.get_device_name(0))
-print("=" * 60)
-from datasets import Dataset, DatasetDict
-from transformers import (
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM,
-    Seq2SeqTrainer,
-    Seq2SeqTrainingArguments,
-    DataCollatorForSeq2Seq,
-)
-import sacrebleu
-from sacrebleu.metrics import BLEU
+import pandas as pd  # safe -- doesn't touch CUDA
 
 # =============================================================
 # CONFIG
@@ -83,13 +83,60 @@ LANGUAGES = {
     "mundari": {"column": "Mundari"},
 }
 
-# Master scores file -- one shared CSV, but since this script now lives in
-# its OWN per-direction subfolder, "shared" here just means shared across
-# this one (language, direction)'s re-runs, not across directions.
 SCORES_CSV = Path("./all_languages_scores.csv")
 
-torch.manual_seed(SEED)
-np.random.seed(SEED)
+# CUDA-touching imports/objects, deferred until after CUDA_VISIBLE_DEVICES
+# is pinned in each GPU-pool worker -- see _lazy_imports() and the module
+# docstring above. Declared here (as None) just so every other function
+# can reference these names as ordinary globals once populated.
+np = torch = sacrebleu = BLEU = None
+Dataset = DatasetDict = None
+AutoTokenizer = AutoModelForSeq2SeqLM = None
+Seq2SeqTrainer = Seq2SeqTrainingArguments = DataCollatorForSeq2Seq = None
+
+
+def _lazy_imports():
+    """Imports everything CUDA-touching, and only on first call inside a
+    worker process -- after _pool_init() has already set
+    CUDA_VISIBLE_DEVICES for that worker (see module docstring)."""
+    global np, torch, sacrebleu, BLEU, Dataset, DatasetDict
+    global AutoTokenizer, AutoModelForSeq2SeqLM
+    global Seq2SeqTrainer, Seq2SeqTrainingArguments, DataCollatorForSeq2Seq
+
+    if torch is not None:
+        return  # already done in this process
+
+    import numpy as _np
+    import torch as _torch
+    import sacrebleu as _sacrebleu
+    from sacrebleu.metrics import BLEU as _BLEU
+    from datasets import Dataset as _Dataset, DatasetDict as _DatasetDict
+    from transformers import (
+        AutoTokenizer as _AutoTokenizer,
+        AutoModelForSeq2SeqLM as _AutoModelForSeq2SeqLM,
+        Seq2SeqTrainer as _Seq2SeqTrainer,
+        Seq2SeqTrainingArguments as _Seq2SeqTrainingArguments,
+        DataCollatorForSeq2Seq as _DataCollatorForSeq2Seq,
+    )
+
+    np, torch, sacrebleu, BLEU = _np, _torch, _sacrebleu, _BLEU
+    Dataset, DatasetDict = _Dataset, _DatasetDict
+    AutoTokenizer, AutoModelForSeq2SeqLM = _AutoTokenizer, _AutoModelForSeq2SeqLM
+    Seq2SeqTrainer = _Seq2SeqTrainer
+    Seq2SeqTrainingArguments = _Seq2SeqTrainingArguments
+    DataCollatorForSeq2Seq = _DataCollatorForSeq2Seq
+
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
+
+    print("=" * 60)
+    print("torch version:", torch.__version__)
+    print("cuda available:", torch.cuda.is_available())
+    print("device count:", torch.cuda.device_count())
+    print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
+    if torch.cuda.is_available():
+        print("GPU:", torch.cuda.get_device_name(0))
+    print("=" * 60)
 
 
 # =============================================================
@@ -264,13 +311,15 @@ def save_training_logs_and_plot(log_history, output_dir, language, direction):
 
 
 # =============================================================
-# 6. MAIN
+# 6. One (language, direction) job -- runs inside one GPU-pinned worker
 # =============================================================
 def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
+    _lazy_imports()
+
     assert language in LANGUAGES, \
-        f"Unknown language '{language}' in config.json, choices: {list(LANGUAGES.keys())}"
+        f"Unknown language '{language}', choices: {list(LANGUAGES.keys())}"
     assert direction in ["en2tgt", "hi2tgt", "tgt2en", "tgt2hi"], \
-        f"Unknown direction '{direction}' in config.json, choices: en2tgt, hi2tgt, tgt2en, tgt2hi"
+        f"Unknown direction '{direction}', choices: en2tgt, hi2tgt, tgt2en, tgt2hi"
 
     cfg = LANGUAGES[language]
     tgt_column = cfg["column"]
@@ -463,6 +512,28 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
     print(f"\nDone with {language}/{direction}. Master scores: {SCORES_CSV}")
 
 
+# =============================================================
+# 7. GPU-pool orchestration -- identical pattern to sarvam_finetune.py /
+#    finetune_indictrans2.py.
+# =============================================================
+_worker_gpu_id = None
+
+
+def _pool_init(gpu_queue):
+    global _worker_gpu_id
+    _worker_gpu_id = gpu_queue.get()
+    # Restrict this worker to exactly one physical GPU -- must happen
+    # before torch is ever imported in this process, which is why all
+    # torch/transformers imports are deferred into _lazy_imports() instead
+    # of sitting at module level.
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(_worker_gpu_id)
+
+
+def _pool_run(job_args):
+    language, direction, train_csv, val_csv, test_csv, epochs = job_args
+    run_direction(language, direction, train_csv, val_csv, test_csv, epochs)
+
+
 def main():
     config_path = Path(__file__).resolve().parent / "config.json"
     with open(config_path, "r", encoding="utf-8") as f:
@@ -479,8 +550,25 @@ def main():
     if isinstance(directions, str):
         directions = [directions]
 
-    for direction in directions:
-        run_direction(language, direction, train_csv, val_csv, test_csv, epochs)
+    import torch  # just to query device count in the launcher process -- harmless, this process doesn't train
+    n_gpus = torch.cuda.device_count()
+    print(f"[gpu] {n_gpus} visible")
+    if n_gpus == 0:
+        raise SystemExit("No GPU visible -- request GPUs on the job scheduler before running this.")
+
+    pool_size = min(n_gpus, len(directions))
+    print(f"[pool] {pool_size} worker(s), {len(directions)} job(s) queued: {directions}")
+
+    ctx = mp.get_context("spawn")
+    gpu_queue = ctx.Queue()
+    for gpu_id in range(pool_size):
+        gpu_queue.put(gpu_id)
+
+    job_args = [(language, direction, train_csv, val_csv, test_csv, epochs) for direction in directions]
+    with ctx.Pool(processes=pool_size, initializer=_pool_init, initargs=(gpu_queue,)) as pool:
+        pool.map(_pool_run, job_args)
+
+    print("\nAll jobs done.")
 
 
 if __name__ == "__main__":

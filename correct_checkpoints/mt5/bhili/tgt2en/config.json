@@ -1,8 +1,0 @@
-{
-  "language": "bhili",
-  "direction": "tgt2en",
-  "epochs": 10,
-  "train_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/dataset_corrected/bhili/train.csv",
-  "val_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/dataset_corrected/bhili/val.csv",
-  "test_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/dataset_corrected/bhili/test.csv"
-}
