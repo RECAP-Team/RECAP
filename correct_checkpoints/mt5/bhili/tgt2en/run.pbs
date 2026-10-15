@@ -1,0 +1,23 @@
+#!/bin/sh
+#PBS -N mt5_bhili_corrected_tgt2en
+#PBS -P misn.mota2.spons
+#PBS -q standard
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=4:ngpus=1
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/mt5/bhili/tgt2en
+
+source ~/.bashrc
+conda activate mt5
+
+# Bhili tgt2en on the CORRECTED dataset (correct_checkpoints/dataset_corrected/bhili/)
+# -- config.json in this directory pins language+direction+epochs+data paths.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python mt5_finetune.py
