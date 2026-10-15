@@ -195,3 +195,13 @@ human_evaluation/*_analysis/
 human_evaluation/_work_50/
 human_evaluation/50samples/
 human_evaluation/50samples/
+
+# PBS job output/error logs (name.o<jobid> / name.e<jobid>), and other
+# per-run clutter that showed up untracked on Pragya
+*.o[0-9]*
+*.e[0-9]*
+index.html
+
+# correct_checkpoints/ -- corrected dataset CSVs live only on Pragya, never
+# committed (same convention as the "datasets" ignore rule above)
+correct_checkpoints/dataset_corrected/*/*.csv
