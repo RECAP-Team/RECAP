@@ -1,0 +1,29 @@
+#!/bin/sh
+#PBS -N it2_bhili_corrected_tgt2en
+#PBS -P misn.mota2.spons
+#PBS -q standard
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=4:ngpus=1
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/indictrans2/bhili
+
+source ~/.bashrc
+conda activate mt5
+
+# Bhili tgt2en on the CORRECTED dataset -- uses base_model_indic_en. LoRA
+# finetune, then test-set inference + scoring chained in the same job.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python finetune_indictrans2.py \
+    --langs bhili \
+    --directions tgt2en
+
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python infer_indictrans2.py \
+    --langs bhili \
+    --directions tgt2en
