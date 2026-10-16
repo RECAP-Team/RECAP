@@ -408,7 +408,11 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
         max_grad_norm=1.0,
         logging_dir=f"{output_dir}/logs",
         logging_steps=1000,
-        dataloader_num_workers=2,
+        # Must stay 0 -- this job runs inside a daemon Pool worker (the
+        # GPU-pool in main()), and daemon processes cannot spawn their own
+        # children, which is exactly what dataloader_num_workers > 0 does.
+        # Same fix as sarvam_finetune.py/finetune_indictrans2.py.
+        dataloader_num_workers=0,
         report_to="none",
         predict_with_generate=True,
         eval_accumulation_steps=4,
