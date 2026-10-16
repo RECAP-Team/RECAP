@@ -471,6 +471,21 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
     use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     print(f"[Train] bf16={use_bf16}")
 
+    # warmup_ratio was removed from TrainingArguments in this transformers
+    # version (verified via inspect.signature -- only warmup_steps, an
+    # absolute count, remains, same issue sarvam_finetune.py already works
+    # around). Compute the equivalent step count ourselves: 3% of total
+    # training steps (steps/epoch * epochs), same warmup fraction the
+    # original warmup_ratio=0.03 meant. When already_trained, tokenized_train
+    # is None and training_args is never actually used to train (skipped
+    # below), so the exact value doesn't matter there.
+    if already_trained:
+        warmup_steps = 0
+    else:
+        steps_per_epoch = max(1, -(-len(tokenized_train) // (8 * 4)))
+        total_steps = steps_per_epoch * epochs
+        warmup_steps = max(1, int(0.03 * total_steps))
+
     # === TRAINING ARGS (standard full-parameter LLM SFT recipe: AdamW,
     #     small LR, short warmup, few epochs -- unlike the MT encoder-decoder
     #     models, LLM SFT typically uses far fewer epochs since the model
@@ -483,7 +498,7 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
         gradient_accumulation_steps=4,
         learning_rate=2e-5,
         lr_scheduler_type="cosine",
-        warmup_ratio=0.03,
+        warmup_steps=warmup_steps,
         eval_strategy="steps",
         eval_steps=900,
         save_strategy="steps",
