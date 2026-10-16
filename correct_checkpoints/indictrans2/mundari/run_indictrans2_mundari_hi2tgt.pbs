@@ -1,0 +1,33 @@
+#!/bin/sh
+#PBS -N it2_mundari_corrected_hi2tgt
+#PBS -P misn.mota2.spons
+#PBS -q standard
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=4:ngpus=1
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/indictrans2/mundari
+
+source ~/.bashrc
+conda activate mt5
+
+# Mundari hi2tgt on the CORRECTED dataset -- LoRA finetune, then test-set
+# inference + scoring (BLEU/spBLEU/chrF++) chained in the same job so the
+# checkpoint, predictions CSV, and scores all land together. Mundari
+# (unr_Deva) needs no vocab-tag patching (needs_new_tag: false in
+# config.json), unlike Bhili -- it already has a real pretrained
+# source-side language tag.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python finetune_indictrans2.py \
+    --langs mundari \
+    --directions hi2tgt
+
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python infer_indictrans2.py \
+    --langs mundari \
+    --directions hi2tgt
