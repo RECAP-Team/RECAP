@@ -1,0 +1,8 @@
+{
+  "language": "mundari",
+  "direction": ["hi2tgt", "tgt2hi", "en2tgt", "tgt2en"],
+  "epochs": 10,
+  "train_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/dataset_corrected/mundari/train.csv",
+  "val_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/dataset_corrected/mundari/val.csv",
+  "test_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/dataset_corrected/mundari/test.csv"
+}
