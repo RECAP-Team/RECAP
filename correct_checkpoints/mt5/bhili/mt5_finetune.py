@@ -67,7 +67,7 @@ import pandas as pd  # safe -- doesn't touch CUDA
 # =============================================================
 # CONFIG
 # =============================================================
-MODEL_NAME = "/home/scai/msr/aiy257590/flash/GRPO_RESEARCH/Models/mt5-base"   # same base model as the original pipeline
+MODEL_NAME = "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/mt5-base"
 MAX_LENGTH = 128
 SEED       = 42
 
