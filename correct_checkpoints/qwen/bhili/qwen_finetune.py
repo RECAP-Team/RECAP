@@ -510,7 +510,11 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
         bf16=use_bf16,
         fp16=False,
         max_grad_norm=1.0,
-        logging_dir=f"{output_dir}/logs",
+        # logging_dir removed -- TrainingArguments in the qwen_llama conda
+        # env's transformers version rejects it as an unexpected kwarg (same
+        # class of version-mismatch issue as the warmup_ratio fix above).
+        # Non-essential: transformers defaults it to output_dir/runs/... on
+        # its own when omitted.
         logging_steps=1000,
         dataloader_num_workers=2,
         report_to="none",
