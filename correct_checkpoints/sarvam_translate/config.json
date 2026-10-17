@@ -4,6 +4,7 @@
   "output_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/sarvam_translate",
   "languages": {
     "bhili": {"dir_name": "bhili", "tgt_col": "Bhili", "en_col": "English"},
-    "mundari": {"dir_name": "mundari", "tgt_col": "Mundari", "en_col": "English"}
+    "mundari": {"dir_name": "mundari", "tgt_col": "Mundari", "en_col": "English"},
+    "gondi": {"dir_name": "gondi", "tgt_col": "Gondi", "en_col": "English"}
   }
 }

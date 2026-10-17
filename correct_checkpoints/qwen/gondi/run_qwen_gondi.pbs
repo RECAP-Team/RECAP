@@ -1,0 +1,24 @@
+#!/bin/sh
+#PBS -N qwen_gondi_corrected
+#PBS -P misn.mota2.spons
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=16:ngpus=4
+#PBS -l walltime=48:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/qwen/gondi
+
+source ~/.bashrc
+conda activate qwen_llama
+
+# DDP across 4 GPUs (one process per GPU, torchrun-managed) -- all 4
+# directions (hi2tgt, tgt2hi, en2tgt, tgt2en) run sequentially within this
+# one job, per config.json, each using all 4 GPUs together via data
+# parallelism. Same GPU strategy as qwen/bhili and qwen/mundari.
+/home/scai/msr/aiy257590/.conda/envs/qwen_llama/bin/python -m torch.distributed.run --nproc_per_node=4 qwen_finetune.py
