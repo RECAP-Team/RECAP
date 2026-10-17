@@ -1,0 +1,5 @@
+language,direction,val_bleu,val_spbleu,val_chrf++,test_bleu,test_spbleu,test_chrf++,test_bleu_beam5,test_spbleu_beam5,test_chrf++_beam5
+mundari,tgt2hi,54.8655,55.8307,68.2499,54.7803,55.5491,68.1011,55.1566,55.9328,68.2359
+mundari,tgt2en,25.2549,27.1401,43.0113,25.4717,27.1843,42.9208,25.0659,26.3783,43.3621
+mundari,hi2tgt,23.2959,39.1046,48.1699,22.8526,38.5451,47.7860,22.4879,38.8828,46.6274
+mundari,en2tgt,14.6407,23.6440,32.7383,14.5011,23.6032,32.8386,13.9111,23.9327,32.7830
