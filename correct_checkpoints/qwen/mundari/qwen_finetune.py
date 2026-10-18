@@ -1,5 +1,5 @@
 """
-Full fine-tune Qwen2.5-0.5B (base) for English/Hindi <-> Bhili translation
+Full fine-tune Qwen2.5-1.5B (base) for English/Hindi <-> Bhili translation
 via supervised instruction fine-tuning (SFT) on Qwen's ChatML template, on
 the CORRECTED Bhili data produced by the dataset-cleanup pass (see
 correct_checkpoints/dataset_corrected/bhili/{train,val,test}.csv and
@@ -87,7 +87,7 @@ from sacrebleu.metrics import BLEU
 # =============================================================
 # CONFIG
 # =============================================================
-MODEL_NAME    = "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/Qwen2.5-0.5B"
+MODEL_NAME    = "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/Qwen2.5-1.5B"
 MAX_LENGTH    = 256   # full prompt+response token budget (chat template adds overhead)
 MAX_NEW_TOKENS = 128  # generation cap for the response only
 SEED          = 42
@@ -356,7 +356,7 @@ def save_training_logs_and_plot(log_history, language, direction):
                      label="eval loss", color="#b5460a", marker="o")
         ax.set_xlabel("step")
         ax.set_ylabel("loss")
-        ax.set_title(f"Qwen2.5-0.5B -- {language}/{direction} training loss")
+        ax.set_title(f"Qwen2.5-1.5B -- {language}/{direction} training loss")
         ax.legend()
         fig.tight_layout()
         plot_path = Path(f"training_loss_plot_{tag}.png")
