@@ -205,3 +205,7 @@ index.html
 # correct_checkpoints/ -- corrected dataset CSVs live only on Pragya, never
 # committed (same convention as the "datasets" ignore rule above)
 correct_checkpoints/dataset_corrected/*/*.csv
+
+# "for adivaani"/data -- same reason: train.csv alone is >100MB, over
+# GitHub's push limit
+for adivaani/data/*.csv
