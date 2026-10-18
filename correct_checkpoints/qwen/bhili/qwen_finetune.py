@@ -526,7 +526,7 @@ def run_direction(language, direction, train_csv, val_csv, test_csv, epochs):
         args=training_args,
         train_dataset=tokenized_train,
         eval_dataset=tokenized_val,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=data_collator,
     )
 
