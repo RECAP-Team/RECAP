@@ -16,6 +16,7 @@ from pathlib import Path
 
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers.trainer_utils import get_last_checkpoint
 from IndicTransToolkit import IndicProcessor
 from peft import PeftModel
 
@@ -29,8 +30,19 @@ MAR_CODE = "mar_Deva"
 
 def run_direction(direction, cfg, mcfg, device):
     adapter_dir = Path(mcfg["output_root"]) / mcfg["ckpt_name_fmt"].format(direction=direction)
-    assert adapter_dir.is_dir(), f"missing LoRA adapter: {adapter_dir}"
-    print(f"\n===== indictrans2 / marathi / {direction} =====\n  adapter: {adapter_dir}")
+    assert adapter_dir.is_dir(), f"missing LoRA adapter dir: {adapter_dir}"
+
+    # Prefer a finished top-level adapter; otherwise fall back to the
+    # latest checkpoint-N/ (job killed mid-training by walltime/preemption
+    # before trainer.save_model() ever ran at the top level -- same
+    # situation as the Mundari IndicTrans2 en2tgt job).
+    if (adapter_dir / "adapter_config.json").exists():
+        checkpoint_path = adapter_dir
+    else:
+        checkpoint_path = get_last_checkpoint(str(adapter_dir))
+        assert checkpoint_path is not None, \
+            f"no finished adapter or checkpoint-N/ found under {adapter_dir}"
+    print(f"\n===== indictrans2 / marathi / {direction} =====\n  adapter: {checkpoint_path}")
 
     hi_to_mar = direction == "hi2tgt"
     src_code, dst_code = (HIN_CODE, MAR_CODE) if hi_to_mar else (MAR_CODE, HIN_CODE)
@@ -41,7 +53,7 @@ def run_direction(direction, cfg, mcfg, device):
     ).to(device)
     tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
 
-    model = PeftModel.from_pretrained(model, str(adapter_dir))
+    model = PeftModel.from_pretrained(model, str(checkpoint_path))
     model.eval()
 
     processor = IndicProcessor(inference=True)
