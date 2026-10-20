@@ -1,0 +1,28 @@
+#!/bin/sh
+#PBS -N it2_mundari_infer_only_en2tgt
+#PBS -P misn.mota2.spons
+#PBS -q standard
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=4:ngpus=1
+#PBS -l walltime=06:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/indictrans2/mundari
+
+source ~/.bashrc
+conda activate mt5
+
+# en2tgt training job was killed mid-epoch by walltime (41%, no finished
+# adapter) -- infer_indictrans2.py already falls back to the latest
+# checkpoint-N/ via get_last_checkpoint() when adapter_config.json is
+# missing at the top level, so this just scores whatever checkpoint
+# survived. No finetune step here -- inference only.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python infer_indictrans2.py \
+    --langs mundari \
+    --directions en2tgt
