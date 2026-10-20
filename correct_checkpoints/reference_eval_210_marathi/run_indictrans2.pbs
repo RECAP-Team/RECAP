@@ -19,5 +19,5 @@ source ~/.bashrc
 conda activate mt5
 
 # Inference-only, original Marathi checkpoint, hi2tgt/tgt2hi, num_beams=4.
-# Results written into indictrans2_finetune/Marathi/reference_eval_210/.
+# Results written into Interpretability-low-resource/scores/marathi/indictrans2/.
 /home/scai/msr/aiy257590/.conda/envs/mt5/bin/python run_indictrans2.py

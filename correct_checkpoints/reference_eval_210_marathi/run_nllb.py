@@ -4,8 +4,9 @@ nllb-marathi-<direction>-finetuned checkpoints (hi2mr, mr2hi -- already
 trained, not retrained here) against the 210-row reference set,
 num_beams=4. Hindi (hin_Deva) and Marathi (mar_Deva) are both native
 NLLB-200 language codes -- no custom tag/embedding resize needed (unlike
-the tribal-language NLLB checkpoints). Results saved inside
-NLLB-finetune/Marathi/reference_eval_210/ (see common_marathi.py).
+the tribal-language NLLB checkpoints). Results saved centrally alongside
+bhili/mundari/gondi under Interpretability-low-resource/scores/marathi/nllb/
+(see common_marathi.py).
 
 Run (1 GPU):
     python run_nllb.py
@@ -52,7 +53,7 @@ def run_direction(direction, cfg, mcfg, device):
             preds.extend(tokenizer.batch_decode(out, skip_special_tokens=True))
             print(f"  decoded {i + len(chunk)}/{len(src_texts)}")
 
-    score_and_save(mcfg["output_root"], direction, ids, src_texts, ref_texts, preds)
+    score_and_save("nllb", direction, ids, src_texts, ref_texts, preds, cfg)
     del model
     torch.cuda.empty_cache()
 

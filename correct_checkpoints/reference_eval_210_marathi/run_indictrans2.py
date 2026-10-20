@@ -6,8 +6,9 @@ num_beams=4. Marathi (mar_Deva) is already a native IndicTrans2 language
 tag -- no add_bhili_tag-style vocab extension needed (needs_new_tag=false
 for Marathi in indictrans2_finetune/config.json). Same base model
 (IndicTrans2-indic-indic-1B) and IndicProcessor pre/post-processing as
-finetune_indictrans2.py / infer_indictrans2.py. Results saved inside
-indictrans2_finetune/Marathi/reference_eval_210/ (see common_marathi.py).
+finetune_indictrans2.py / infer_indictrans2.py. Results saved centrally
+alongside bhili/mundari/gondi under
+Interpretability-low-resource/scores/marathi/indictrans2/ (see common_marathi.py).
 
 Run (1 GPU, mt5 conda env -- same env the original indictrans2 scripts use):
     python run_indictrans2.py
@@ -79,7 +80,7 @@ def run_direction(direction, cfg, mcfg, device):
             preds.extend(processor.postprocess_batch(decoded, lang=dst_code))
             print(f"  decoded {i + len(chunk)}/{len(src_texts)}")
 
-    score_and_save(mcfg["output_root"], direction, ids, src_texts, ref_texts, preds)
+    score_and_save("indictrans2", direction, ids, src_texts, ref_texts, preds, cfg)
     del model
     torch.cuda.empty_cache()
 

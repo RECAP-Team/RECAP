@@ -19,5 +19,5 @@ source ~/.bashrc
 conda activate sarvam
 
 # Inference-only, original Marathi checkpoint, hi2tgt/tgt2hi, num_beams=4.
-# Results written into sarvam_finetune/Marathi/reference_eval_210/.
+# Results written into Interpretability-low-resource/scores/marathi/sarvam/.
 /home/scai/msr/aiy257590/.conda/envs/sarvam/bin/python run_sarvam.py

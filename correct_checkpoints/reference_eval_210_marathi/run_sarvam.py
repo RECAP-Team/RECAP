@@ -4,8 +4,8 @@ sarvam-marathi-<direction>-finetuned checkpoints (hi2tgt, tgt2hi --
 already trained, not retrained here) against the 210-row reference set,
 num_beams=4. Same prompt format as sarvam_finetune.py's generate_and_score
 (system: "Translate the text below to {tgt_name}.", user: source
-verbatim). Results saved inside sarvam_finetune/Marathi/
-reference_eval_210/ (see common_marathi.py).
+verbatim). Results saved centrally alongside bhili/mundari/gondi under
+Interpretability-low-resource/scores/marathi/sarvam/ (see common_marathi.py).
 
 Run (1 GPU, sarvam conda env):
     python run_sarvam.py
@@ -70,7 +70,7 @@ def run_direction(direction, cfg, mcfg, device):
             print(f"  decoded {i + len(chunk)}/{len(src_texts)}")
 
     tokenizer.padding_side = "right"
-    score_and_save(mcfg["output_root"], direction, ids, src_texts, ref_texts, preds)
+    score_and_save("sarvam", direction, ids, src_texts, ref_texts, preds, cfg)
     del model
     torch.cuda.empty_cache()
 

@@ -3,8 +3,9 @@ Inference-only: score the ORIGINAL mt5_finetune/Marathi/
 mt5-marathi-<direction>-finetuned checkpoints (hi2mr, mr2hi -- already
 trained, not retrained here) against the 210-row reference set,
 num_beams=4. Same T5-style instruction prefix as mt5_finetune.py's own
-manual inference block. Results saved inside mt5_finetune/Marathi/
-reference_eval_210/ (see common_marathi.py).
+manual inference block. Results saved centrally alongside bhili/mundari/
+gondi under Interpretability-low-resource/scores/marathi/mt5/ (see
+common_marathi.py).
 
 Run (1 GPU):
     python run_mt5.py
@@ -48,7 +49,7 @@ def run_direction(direction, cfg, mcfg, device):
             preds.extend(tokenizer.batch_decode(out, skip_special_tokens=True))
             print(f"  decoded {i + len(chunk)}/{len(src_texts)}")
 
-    score_and_save(mcfg["output_root"], direction, ids, src_texts, ref_texts, preds)
+    score_and_save("mt5", direction, ids, src_texts, ref_texts, preds, cfg)
     del model
     torch.cuda.empty_cache()
 

@@ -1,5 +1,6 @@
 {
   "test_csv": "/home/scai/msr/aiy257590/flash/Interpretability-low-resource/unified_data/test_210_hindi_mundari_gondi.csv",
+  "scores_root": "/home/scai/msr/aiy257590/flash/Interpretability-low-resource/scores",
   "num_beams": 4,
   "indictrans2_base_model": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/IndicTrans2-indic-indic-1B",
   "models": {

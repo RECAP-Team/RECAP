@@ -11,10 +11,12 @@ retraining. Direction naming differs per model (NLLB/mT5 were trained as
 hi2mr/mr2hi; Sarvam/IndicTrans2 as hi2tgt/tgt2hi) but both map to the same
 Hindi<->Marathi column pair.
 
-Output, per model, saved INSIDE that model's own existing Marathi
-directory (not centrally) -- <output_root>/reference_eval_210/:
-    row_scores_<direction>.csv   -- per-row BLEU/spBLEU/chrF++
-    summary.csv                  -- one row per direction, averaged
+Output saved centrally, alongside the bhili/mundari/gondi results from
+../reference_eval_210/, under config.json's "scores_root":
+    scores/marathi/<model>/<direction>/row_scores.csv   -- per-row BLEU/spBLEU/chrF++
+    scores/summary_scores.csv                            -- one row per (language, model, direction), averaged
+(same file/format as ../reference_eval_210/common.py -- this just appends
+"marathi" rows to it)
 """
 
 import csv
@@ -48,10 +50,12 @@ def load_marathi_pairs(test_csv, hi_to_mar):
     return df["unique_id"].tolist(), df[src_col].tolist(), df[ref_col].tolist()
 
 
-def score_and_save(output_root, direction, ids, src_texts, ref_texts, preds):
-    """Sentence-level BLEU/spBLEU/chrF++ per row, saved under
-    <output_root>/reference_eval_210/, plus the mean of each metric over
-    all rows appended as one line to that same dir's summary.csv."""
+def score_and_save(model_name, direction, ids, src_texts, ref_texts, preds, cfg):
+    """Sentence-level BLEU/spBLEU/chrF++ per row, saved to
+    scores/marathi/<model>/<direction>/row_scores.csv, plus the mean of
+    each metric over all rows appended as one line to the shared
+    scores/summary_scores.csv (same file ../reference_eval_210/ writes to,
+    with language="marathi")."""
     spbleu_scorer = BLEU(tokenize="flores200")
 
     rows = []
@@ -64,25 +68,27 @@ def score_and_save(output_root, direction, ids, src_texts, ref_texts, preds):
             "bleu": round(bleu, 4), "spbleu": round(spbleu, 4), "chrf++": round(chrf, 4),
         })
 
-    out_dir = Path(output_root) / "reference_eval_210"
+    out_dir = Path(cfg["scores_root"]) / "marathi" / model_name / direction
     out_dir.mkdir(parents=True, exist_ok=True)
     row_df = pd.DataFrame(rows)
-    row_scores_path = out_dir / f"row_scores_{direction}.csv"
+    row_scores_path = out_dir / "row_scores.csv"
     row_df.to_csv(row_scores_path, index=False, encoding="utf-8-sig")
-    print(f"[{direction}] row scores -> {row_scores_path}")
+    print(f"[{model_name}/marathi/{direction}] row scores -> {row_scores_path}")
 
     avg_bleu = row_df["bleu"].mean()
     avg_spbleu = row_df["spbleu"].mean()
     avg_chrf = row_df["chrf++"].mean()
 
-    summary_csv = out_dir / "summary.csv"
-    header = ["direction", "rows", "avg_bleu", "avg_spbleu", "avg_chrf++"]
-    row = [direction, len(row_df), f"{avg_bleu:.4f}", f"{avg_spbleu:.4f}", f"{avg_chrf:.4f}"]
+    summary_csv = Path(cfg["scores_root"]) / "summary_scores.csv"
+    summary_csv.parent.mkdir(parents=True, exist_ok=True)
+    header = ["language", "model", "direction", "rows", "avg_bleu", "avg_spbleu", "avg_chrf++"]
+    row = ["marathi", model_name, direction, len(row_df),
+           f"{avg_bleu:.4f}", f"{avg_spbleu:.4f}", f"{avg_chrf:.4f}"]
     is_new = not summary_csv.exists()
     with open(summary_csv, "a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         if is_new:
             w.writerow(header)
         w.writerow(row)
-    print(f"[{direction}] avg BLEU={avg_bleu:.4f} spBLEU={avg_spbleu:.4f} "
-          f"chrF++={avg_chrf:.4f} -> {summary_csv}")
+    print(f"[{model_name}/marathi/{direction}] avg BLEU={avg_bleu:.4f} "
+          f"spBLEU={avg_spbleu:.4f} chrF++={avg_chrf:.4f} -> {summary_csv}")

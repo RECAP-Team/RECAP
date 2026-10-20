@@ -19,5 +19,5 @@ source ~/.bashrc
 conda activate mt5
 
 # Inference-only, original Marathi checkpoint, hi2mr/mr2hi, num_beams=4.
-# Results written into NLLB-finetune/Marathi/reference_eval_210/.
+# Results written into Interpretability-low-resource/scores/marathi/nllb/.
 /home/scai/msr/aiy257590/.conda/envs/mt5/bin/python run_nllb.py
