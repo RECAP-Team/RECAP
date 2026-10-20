@@ -1,0 +1,23 @@
+#!/bin/sh
+#PBS -N ref210_qwen
+#PBS -P misn.mota2.spons
+#PBS -q standard
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=4:ngpus=1
+#PBS -l walltime=02:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/reference_eval_210
+
+source ~/.bashrc
+conda activate qwen_llama
+
+# Inference-only, 210-row reference set, all 3 languages x hi2tgt/tgt2hi,
+# num_beams=4 -- see common.py / config.json for the shared layout.
+/home/scai/msr/aiy257590/.conda/envs/qwen_llama/bin/python run_qwen.py
