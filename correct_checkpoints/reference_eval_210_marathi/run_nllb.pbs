@@ -1,0 +1,23 @@
+#!/bin/sh
+#PBS -N ref210_nllb_marathi
+#PBS -P misn.mota2.spons
+#PBS -q standard
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=4:ngpus=1
+#PBS -l walltime=02:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/reference_eval_210_marathi
+
+source ~/.bashrc
+conda activate mt5
+
+# Inference-only, original Marathi checkpoint, hi2mr/mr2hi, num_beams=4.
+# Results written into NLLB-finetune/Marathi/reference_eval_210/.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python run_nllb.py

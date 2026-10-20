@@ -1,0 +1,27 @@
+{
+  "test_csv": "/home/scai/msr/aiy257590/flash/Interpretability-low-resource/unified_data/test_210_hindi_mundari_gondi.csv",
+  "num_beams": 4,
+  "indictrans2_base_model": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Models/IndicTrans2-indic-indic-1B",
+  "models": {
+    "mt5": {
+      "output_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/mt5_finetune/Marathi",
+      "ckpt_name_fmt": "mt5-marathi-{direction}-finetuned",
+      "directions": ["hi2mr", "mr2hi"]
+    },
+    "nllb": {
+      "output_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/NLLB-finetune/Marathi",
+      "ckpt_name_fmt": "nllb-marathi-{direction}-finetuned",
+      "directions": ["hi2mr", "mr2hi"]
+    },
+    "sarvam": {
+      "output_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/sarvam_finetune/Marathi",
+      "ckpt_name_fmt": "sarvam-marathi-{direction}-finetuned",
+      "directions": ["hi2tgt", "tgt2hi"]
+    },
+    "indictrans2": {
+      "output_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/indictrans2_finetune/Marathi",
+      "ckpt_name_fmt": "indictrans2-marathi-{direction}-lora",
+      "directions": ["hi2tgt", "tgt2hi"]
+    }
+  }
+}
