@@ -1,0 +1,23 @@
+#!/bin/sh
+#PBS -N haq_bhili_mt5
+#PBS -P misn.mota2.spons
+#PBS -q standard
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=4:ngpus=1
+#PBS -l walltime=02:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/dataset_corrected/bhili/haq_eval
+
+source ~/.bashrc
+conda activate mt5
+
+# Inference-only, corrected mt5-bhili-hi2tgt-finetuned checkpoint, HAQ
+# test set, num_beams=4. Results written into haq_scores/mt5/.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python run_mt5.py

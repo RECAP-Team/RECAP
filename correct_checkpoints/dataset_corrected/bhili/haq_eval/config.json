@@ -1,0 +1,10 @@
+{
+  "test_csv": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/dataset_corrected/bhili/Bhili_test_data_haq.csv",
+  "id_col": "Serial no.",
+  "src_col": "Hindi",
+  "ref_col": "Bhili",
+  "mt5_ckpt": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/mt5/bhili/mt5-bhili-hi2tgt-finetuned",
+  "sarvam_ckpt": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/sarvam_translate/bhili/sarvam-bhili-hi2tgt-finetuned",
+  "scores_root": "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/correct_checkpoints/dataset_corrected/bhili/haq_scores",
+  "num_beams": 4
+}
