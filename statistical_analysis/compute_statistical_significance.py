@@ -17,15 +17,28 @@ Testing" as closely as possible:
   - The paper reports no plots for this analysis (A.10.5 is tables only,
     Tables 11-14) -- so none are produced here either, to match exactly.
 
-Baseline: Sarvam-Translate (BASELINE_MODEL below) -- chosen because it has
+Reads predictions from the CORRECTED checkpoints under
+correct_checkpoints/<model>/<lang>/ (dataset-corrected finetunes), NOT the
+older <model>_finetune/ trees this script originally pointed at. Each
+model's finetune/infer script saves its own filename and column-naming
+convention there -- captured per-model in MODEL_SPECS/BASELINE_SPEC below,
+read directly off each script rather than assumed:
+    nllb/mt5/qwen:  <root>/<lang>/test_predictions_<lang>_<direction>.csv
+                    columns: prediction_<tgt>, reference_<tgt>
+    sarvam_translate: <root>/<lang>/test_predictions_<lang>_<direction>.csv
+                    columns: prediction, reference  (no suffix)
+    indictrans2:    <root>/<lang>/infer_predictions_<lang>_<direction>.csv
+                    columns: prediction (no suffix), reference_<tgt>
+
+Baseline: Sarvam-Translate (BASELINE_SPEC below) -- chosen because it has
 the best overall average test spBLEU/chrF++ across all 12 (language,
 direction) combinations among the models currently in scope, mirroring the
 paper's own approach of using its strongest/main system (NLLB-200) as the
 reference every other model is compared against.
 
-Models in scope (5): NLLB, mT5, Qwen, IndicTrans2 -- compared against the
-Sarvam baseline. Any (language, direction) a model has no data for is
-simply skipped with a printed warning, same as any other missing file.
+Models in scope (5): NLLB, mT5, Qwen2.5-1.5B, IndicTrans2 -- compared
+against the Sarvam baseline. Any (language, direction) a model has no data
+for is simply skipped with a printed warning, same as any other missing file.
 
 p-value: two-tailed, estimated from the 1,000-sample bootstrap distribution
 of (other_model - baseline) differences as 2 * min(P(diff <= 0),
@@ -37,8 +50,8 @@ Bhili_hi2tgt_significance.csv, matching the paper's Tables 11-14 shape:
 model, delta_chrF++, ci_low, ci_high, p_value), plus one combined
 all_significance_results.csv with every (language, direction, model) row.
 
-Run (on Pragya -- reuses already-saved infer_predictions_*.csv, no
-inference rerun needed):
+Run (on Pragya -- reuses already-saved test_predictions_*.csv /
+infer_predictions_*.csv, no inference rerun needed):
     python compute_statistical_significance.py
     python compute_statistical_significance.py --n_bootstrap 1000 --seed 42
 """
@@ -62,7 +75,8 @@ N_BOOTSTRAP = 1000
 CI_LOW_PCT, CI_HIGH_PCT = 2.5, 97.5
 
 # What the *target* (reference) column is named for each direction, per
-# infer.py's own `tgt_col`/`reference_{tgt_col.lower()}` convention.
+# each finetune/infer script's own `tgt_col`/`reference_{tgt_col.lower()}`
+# convention (Hindi/English/<Lang> are the literal column names used).
 TGT_COL_BY_DIRECTION = {
     "hi2tgt": lambda lang: lang,
     "en2tgt": lambda lang: lang,
@@ -70,40 +84,42 @@ TGT_COL_BY_DIRECTION = {
     "tgt2en": lambda lang: "English",
 }
 
-# (display name, <root>/ directory name, path style)
-# "nested_lang_split": <root>/<Lang>/infer_predictions_<lang>_<direction>_test.csv
-# "flat_no_split":     <root>/infer_predictions_<lang>_<direction>.csv (IndicTrans2 --
-#                       no per-language subdir, no val/test suffix: it only
-#                       ever runs inference on test.csv)
-BASELINE_MODEL = ("Sarvam-Translate", "sarvam_finetune", "nested_lang_split")
+# (display name, dir name under correct_checkpoints/, filename prefix,
+#  prediction-column style, reference-column style)
+#   filename prefix: "test_predictions" (nllb/mt5/qwen/sarvam) or
+#                     "infer_predictions" (indictrans2)
+#   column style: "suffixed" -> f"{prefix}_{tgt_col.lower()}"
+#                 "plain"    -> just "prediction" / "reference"
+# (verified directly against each model's finetune_*.py/infer_*.py .to_csv
+# call, not assumed -- see module docstring table.)
+BASELINE_SPEC = ("Sarvam-Translate", "sarvam_translate", "test_predictions", "plain", "plain")
 
-MODELS = [
-    ("NLLB",          "NLLB-finetune", "nested_lang_split"),
-    ("mT5",           "mt5_finetune",  "nested_lang_split"),
-    ("Qwen2.5-0.5B",  "qwen_finetune", "nested_lang_split"),
-    ("IndicTrans2",   "indictrans2_finetune", "flat_no_split"),
+MODEL_SPECS = [
+    ("NLLB",            "nllb",        "test_predictions",  "suffixed", "suffixed"),
+    ("mT5",             "mt5",         "test_predictions",  "suffixed", "suffixed"),
+    ("Qwen2.5-1.5B",    "qwen",        "test_predictions",  "suffixed", "suffixed"),
+    ("IndicTrans2",     "indictrans2", "infer_predictions", "plain",    "suffixed"),
 ]
 
 
-def get_preds_path(recap_root, root_name, style, lang, direction):
-    if style == "nested_lang_split":
-        return Path(recap_root) / root_name / lang / f"infer_predictions_{lang.lower()}_{direction}_test.csv"
-    else:  # flat_no_split (IndicTrans2)
-        return Path(recap_root) / root_name / f"infer_predictions_{lang.lower()}_{direction}.csv"
+def get_preds_path(recap_root, dir_name, filename_prefix, lang, direction):
+    return (Path(recap_root) / "correct_checkpoints" / dir_name / lang.lower()
+            / f"{filename_prefix}_{lang.lower()}_{direction}.csv")
 
 
-def load_segment_chrf(recap_root, root_name, style, lang, direction):
+def load_segment_chrf(recap_root, dir_name, filename_prefix, pred_style, ref_style, lang, direction):
     """Returns a list of per-segment chrF++ scores (one per test-set row),
     or None if the prediction file / reference column isn't there yet."""
-    preds_path = get_preds_path(recap_root, root_name, style, lang, direction)
+    preds_path = get_preds_path(recap_root, dir_name, filename_prefix, lang, direction)
     if not preds_path.exists():
         return None, preds_path
     df = pd.read_csv(preds_path)
     tgt_col = TGT_COL_BY_DIRECTION[direction](lang)
-    ref_col = f"reference_{tgt_col.lower()}"
-    if ref_col not in df.columns:
+    pred_col = "prediction" if pred_style == "plain" else f"prediction_{tgt_col.lower()}"
+    ref_col = "reference" if ref_style == "plain" else f"reference_{tgt_col.lower()}"
+    if pred_col not in df.columns or ref_col not in df.columns:
         return None, preds_path
-    hyps = df["prediction"].astype(str).tolist()
+    hyps = df[pred_col].astype(str).tolist()
     refs = df[ref_col].astype(str).tolist()
     scores = [_CHRF_METRIC.sentence_score(h, [r]).score for h, r in zip(hyps, refs)]
     return scores, preds_path
@@ -142,22 +158,22 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed)
 
-    baseline_name, baseline_root, baseline_style = BASELINE_MODEL
+    baseline_name, baseline_dir, baseline_prefix, baseline_pred_style, baseline_ref_style = BASELINE_SPEC
     all_rows = []
 
     for lang in LANGUAGES:
         for direction in DIRECTIONS:
             print(f"\n===== {lang}/{direction} (baseline: {baseline_name}) =====")
             baseline_scores, baseline_path = load_segment_chrf(
-                args.recap_root, baseline_root, baseline_style, lang, direction)
+                args.recap_root, baseline_dir, baseline_prefix, baseline_pred_style, baseline_ref_style, lang, direction)
             if baseline_scores is None:
                 print(f"[skip] baseline not found/no reference: {baseline_path}")
                 continue
 
             table_rows = []
-            for model_name, root_name, style in MODELS:
+            for model_name, dir_name, filename_prefix, pred_style, ref_style in MODEL_SPECS:
                 other_scores, preds_path = load_segment_chrf(
-                    args.recap_root, root_name, style, lang, direction)
+                    args.recap_root, dir_name, filename_prefix, pred_style, ref_style, lang, direction)
                 if other_scores is None:
                     print(f"[skip] {model_name}: not found/no reference ({preds_path})")
                     continue
