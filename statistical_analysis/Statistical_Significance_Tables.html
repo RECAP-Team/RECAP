@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: "Times New Roman", Times, serif; font-size: 10.5pt; color: #000; }
+  h1 { font-size: 14pt; text-align: center; margin-bottom: 4pt; }
+  .subtitle { text-align: center; font-size: 10pt; color: #444; margin-bottom: 20pt; }
+  .grid { display: flex; flex-wrap: wrap; gap: 18pt 24pt; }
+  .table-block { width: 46%; break-inside: avoid; margin-bottom: 14pt; }
+  table { border-collapse: collapse; width: 100%; }
+  thead tr { border-top: 1.1pt solid #000; border-bottom: 0.7pt solid #000; }
+  tbody tr:last-child { border-bottom: 1.1pt solid #000; }
+  th, td { padding: 3pt 6pt; text-align: left; font-size: 9.5pt; }
+  th { font-weight: bold; }
+  td:nth-child(2), td:nth-child(3), th:nth-child(2), th:nth-child(3) { text-align: left; }
+  .caption { font-size: 9pt; margin-top: 4pt; line-height: 1.3; }
+  .lang-header { font-size: 12pt; font-weight: bold; margin: 16pt 0 6pt 0; }
+  .lang-header.new-page { break-before: page; }
+</style>
+</head>
+<body>
+  <h1>Statistical Significance Testing</h1>
+  <div class="subtitle">Paired bootstrap resampling (1,000 iterations), segment-level chrF++ -- replicating 2025.findings-emnlp.508.pdf Appendix A.10.5</div>
+  <div class="lang-header">Bhili</div>
+<div class="grid">
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-1.22 [-1.39, -1.06]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>+0.30 [0.13, 0.45]</td><td>&lt;0.001</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-5.73 [-5.96, -5.51]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-2.36 [-2.51, -2.20]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 1: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for Hindi&rarr;Bhili.</div>
+    </div>
+    
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-3.84 [-4.01, -3.67]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>-0.53 [-0.69, -0.36]</td><td>&lt;0.001</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-10.64 [-10.89, -10.40]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-4.49 [-4.67, -4.31]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 2: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for Bhili&rarr;Hindi.</div>
+    </div>
+    
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-2.59 [-2.75, -2.42]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>+0.37 [0.22, 0.52]</td><td>&lt;0.001</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-5.04 [-5.19, -4.88]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-3.41 [-3.56, -3.25]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 3: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for English&rarr;Bhili.</div>
+    </div>
+    
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-2.63 [-2.82, -2.44]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>-0.30 [-0.50, -0.13]</td><td>0.004</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-5.23 [-5.43, -5.02]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-2.79 [-2.99, -2.59]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 4: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for Bhili&rarr;English.</div>
+    </div>
+    
+</div>
+<div class="lang-header new-page">Mundari</div>
+<div class="grid">
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-6.61 [-6.82, -6.40]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>-0.08 [-0.27, 0.12]</td><td>0.432</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-11.08 [-11.32, -10.83]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-11.46 [-11.70, -11.23]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 5: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for Hindi&rarr;Mundari.</div>
+    </div>
+    
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-7.39 [-7.60, -7.20]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>+0.03 [-0.16, 0.23]</td><td>0.758</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-22.01 [-22.38, -21.62]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-10.11 [-10.34, -9.87]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 6: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for Mundari&rarr;Hindi.</div>
+    </div>
+    
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-4.13 [-4.31, -3.97]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>-0.25 [-0.40, -0.10]</td><td>&lt;0.001</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-8.33 [-8.52, -8.14]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-7.97 [-8.19, -7.78]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 7: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for English&rarr;Mundari.</div>
+    </div>
+    
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-4.07 [-4.29, -3.86]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>-2.32 [-2.53, -2.11]</td><td>&lt;0.001</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-6.59 [-6.84, -6.35]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-4.46 [-4.66, -4.23]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 8: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for Mundari&rarr;English.</div>
+    </div>
+    
+</div>
+<div class="lang-header new-page">Gondi</div>
+<div class="grid">
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-4.34 [-4.64, -4.02]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>-0.06 [-0.33, 0.21]</td><td>0.670</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-3.63 [-3.95, -3.32]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-7.68 [-8.00, -7.37]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 9: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for Hindi&rarr;Gondi.</div>
+    </div>
+    
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-8.86 [-9.27, -8.43]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>+0.14 [-0.23, 0.52]</td><td>0.434</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-11.49 [-11.89, -11.06]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-11.63 [-12.03, -11.22]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 10: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for Gondi&rarr;Hindi.</div>
+    </div>
+    
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-4.72 [-5.03, -4.43]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>+0.02 [-0.25, 0.30]</td><td>0.894</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-5.01 [-5.30, -4.71]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-7.60 [-7.90, -7.31]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 11: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for English&rarr;Gondi.</div>
+    </div>
+    
+
+    <div class="table-block">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>&Delta;chrF++ [95% CI]</th><th>p</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>NLLB</td><td>-4.78 [-5.15, -4.41]</td><td>&lt;0.001</td></tr>
+<tr><td>mT5</td><td>-1.42 [-1.78, -1.07]</td><td>&lt;0.001</td></tr>
+<tr><td>Qwen2.5-1.5B</td><td>-4.94 [-5.24, -4.59]</td><td>&lt;0.001</td></tr>
+<tr><td>IndicTrans2</td><td>-6.04 [-6.40, -5.70]</td><td>&lt;0.001</td></tr>
+        </tbody>
+      </table>
+      <div class="caption">Table 12: &Delta;chrF++ (95% CI, p-values) vs. Sarvam-Translate for Gondi&rarr;English.</div>
+    </div>
+    
+</div>
+</body>
+</html>

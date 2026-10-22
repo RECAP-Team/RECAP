@@ -1,0 +1,5 @@
+language,direction,baseline,model,delta_chrF++,ci_low,ci_high,p_value,n_segments
+Mundari,tgt2en,Sarvam-Translate,NLLB,-4.066,-4.2869,-3.8623,0.0,20178
+Mundari,tgt2en,Sarvam-Translate,mT5,-2.3202,-2.5326,-2.1106,0.0,20178
+Mundari,tgt2en,Sarvam-Translate,Qwen2.5-1.5B,-6.5893,-6.8351,-6.3533,0.0,20178
+Mundari,tgt2en,Sarvam-Translate,IndicTrans2,-4.4579,-4.6568,-4.2322,0.0,20178

@@ -1,0 +1,5 @@
+language,direction,baseline,model,delta_chrF++,ci_low,ci_high,p_value,n_segments
+Gondi,tgt2hi,Sarvam-Translate,NLLB,-8.8564,-9.2723,-8.4264,0.0,9972
+Gondi,tgt2hi,Sarvam-Translate,mT5,0.139,-0.2272,0.5178,0.434,9972
+Gondi,tgt2hi,Sarvam-Translate,Qwen2.5-1.5B,-11.4857,-11.8935,-11.0608,0.0,9972
+Gondi,tgt2hi,Sarvam-Translate,IndicTrans2,-11.6327,-12.034,-11.2222,0.0,9972
