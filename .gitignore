@@ -209,3 +209,7 @@ correct_checkpoints/dataset_corrected/*/*.csv
 # "for adivaani"/data -- same reason: train.csv alone is >100MB, over
 # GitHub's push limit
 for adivaani/data/*.csv
+
+# Adivaani_MISN/Dataset -- merged/deduped/split Bhili CSVs, several files
+# over 100MB (same reason as the "for adivaani"/data rule above)
+Adivaani_MISN/**/*.csv
