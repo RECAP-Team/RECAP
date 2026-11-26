@@ -1,0 +1,24 @@
+#!/bin/sh
+#PBS -N mt5_bhili_infer_newtestset
+#PBS -P misn.mota2.spons
+#PBS -q standard
+#PBS -m bea
+#PBS -M aiy257590@scai.iitd.ac.in
+#PBS -l select=1:ncpus=4:ngpus=2
+#PBS -l walltime=02:00:00
+
+echo "==============================="
+echo $PBS_JOBID
+cat $PBS_NODEFILE
+echo "==============================="
+cd $HOME
+
+cd /home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP/Adivaani_MISN/mt5
+
+source ~/.bashrc
+conda activate mt5
+
+# Inference only (no training) on the new English/Hindi-only test set --
+# hi2tgt and en2tgt, one direction per GPU, using the already fine-tuned
+# checkpoints in this same directory.
+/home/scai/msr/aiy257590/.conda/envs/mt5/bin/python infer_new_testset.py
