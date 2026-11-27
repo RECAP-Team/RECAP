@@ -43,7 +43,7 @@ INDICTRANS2_BASE_MODEL = f"{REPO_ROOT}/Models/IndicTrans2-indic-en-1B"
 HIN_CODE = "hin_Deva"
 ENG_CODE = "eng_Latn"
 MAX_LENGTH = 256
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 NUM_BEAMS = 5
 SAVE_EVERY_ROWS = 5000  # checkpoint to disk after at least this many new rows
 
