@@ -14,8 +14,9 @@ Hindi, Bhili).
 Resumable: if the file already has a partially-filled 'English' column
 (e.g. from a previous run that ran out of walltime), only the still-empty
 rows are translated. Progress is checkpointed back to the same CSV every
-SAVE_EVERY batches, so an interrupted run can just be re-started with the
-exact same command to continue where it left off.
+SAVE_EVERY_ROWS (5,000) rows, so an interrupted/crashed run can just be
+re-started with the exact same command to continue where it left off,
+losing at most the last <5,000 rows of work.
 
 Run (1 GPU, interactive job):
     python infer_full_hi2en_indictrans2.py
@@ -44,7 +45,7 @@ ENG_CODE = "eng_Latn"
 MAX_LENGTH = 256
 BATCH_SIZE = 16
 NUM_BEAMS = 5
-SAVE_EVERY = 200  # batches (~3200 rows) between checkpoint saves
+SAVE_EVERY_ROWS = 5000  # checkpoint to disk after at least this many new rows
 
 OUT_COLS = ["Unique_ID", "English", "Hindi", "Bhili"]
 
@@ -83,6 +84,7 @@ def main():
 
     start_time = time.time()
     n_done_this_run = 0
+    rows_since_checkpoint = 0
     with torch.no_grad():
         for b in range(0, len(todo_idx), BATCH_SIZE):
             batch_idx = todo_idx[b:b + BATCH_SIZE]
@@ -103,6 +105,7 @@ def main():
                 df.at[i, "English"] = pred
 
             n_done_this_run += len(batch_idx)
+            rows_since_checkpoint += len(batch_idx)
             elapsed = time.time() - start_time
             rate = n_done_this_run / elapsed if elapsed > 0 else 0
             remaining = len(todo_idx) - n_done_this_run
@@ -110,9 +113,9 @@ def main():
             print(f"[progress] {n_done_this_run}/{len(todo_idx)} this run "
                   f"({rate:.1f} rows/sec, ETA {eta_min:.1f} min)")
 
-            batch_num = b // BATCH_SIZE
-            if (batch_num + 1) % SAVE_EVERY == 0:
+            if rows_since_checkpoint >= SAVE_EVERY_ROWS:
                 df[OUT_COLS].to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
+                rows_since_checkpoint = 0
                 print(f"[checkpoint] saved progress -> {CSV_PATH}")
 
     df[OUT_COLS].to_csv(CSV_PATH, index=False, encoding="utf-8-sig")
