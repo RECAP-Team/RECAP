@@ -129,22 +129,57 @@ def translate_with_sarvam(src_texts, device):
     return preds
 
 
+PRED_COLS = ["Predicted_English_IndicTrans2", "Predicted_English_Sarvam"]
+
+
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--models", default="indictrans2,sarvam",
+                     help="comma-separated subset of: indictrans2,sarvam -- lets you run "
+                          "each model in its own conda env (e.g. IndicTrans2 needs 'mt5', "
+                          "Sarvam-Translate's gemma3 base needs a newer transformers in 'sarvam')")
+    args = ap.parse_args()
+    requested = {m.strip() for m in args.models.split(",") if m.strip()}
+
     df = pd.read_csv(INPUT_CSV, dtype=str, keep_default_na=False, na_values=[])
     print(f"[read] {INPUT_CSV} ({len(df)} rows)")
     for col in ("Hindi", "English"):
         assert col in df.columns, f"expected column '{col}' in {INPUT_CSV}, got {list(df.columns)}"
+
+    # If a previous (partial) run already wrote predictions (e.g. IndicTrans2 in one
+    # env, Sarvam in another), load them so this run doesn't lose/overwrite them.
+    if Path(OUTPUT_CSV).exists():
+        prev = pd.read_csv(OUTPUT_CSV, dtype=str, keep_default_na=False, na_values=[])
+        for col in PRED_COLS:
+            if col in prev.columns and len(prev) == len(df):
+                df[col] = prev[col]
+        print(f"[resume] loaded existing predictions from {OUTPUT_CSV}: "
+              f"{[c for c in PRED_COLS if c in df.columns and df[c].str.len().gt(0).any()]}")
 
     src_texts = df["Hindi"].astype(str).str.strip().tolist()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[device] {device}  (cuda available: {torch.cuda.is_available()})")
 
-    df["Predicted_English_IndicTrans2"] = translate_with_indictrans2(src_texts, device)
-    df["Predicted_English_Sarvam"] = translate_with_sarvam(src_texts, device)
+    out_cols = ["Hindi", "English"] + PRED_COLS
 
-    out_cols = ["Hindi", "English", "Predicted_English_IndicTrans2", "Predicted_English_Sarvam"]
-    df[out_cols].to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    if "indictrans2" in requested:
+        df["Predicted_English_IndicTrans2"] = translate_with_indictrans2(src_texts, device)
+        for c in PRED_COLS:
+            if c not in df.columns:
+                df[c] = ""
+        df[out_cols].to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+        print(f"[saved] IndicTrans2 predictions -> {OUTPUT_CSV}")
+
+    if "sarvam" in requested:
+        df["Predicted_English_Sarvam"] = translate_with_sarvam(src_texts, device)
+        for c in PRED_COLS:
+            if c not in df.columns:
+                df[c] = ""
+        df[out_cols].to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+        print(f"[saved] Sarvam predictions -> {OUTPUT_CSV}")
+
     print(f"[done] {len(df)} rows -> {OUTPUT_CSV}")
 
 
