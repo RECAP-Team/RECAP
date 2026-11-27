@@ -43,7 +43,7 @@ HIN_CODE = "hin_Deva"
 ENG_CODE = "eng_Latn"
 MAX_LENGTH = 256
 BATCH_SIZE = 16
-NUM_BEAMS = 4
+NUM_BEAMS = 5
 SAVE_EVERY = 200  # batches (~3200 rows) between checkpoint saves
 
 OUT_COLS = ["Unique_ID", "English", "Hindi", "Bhili"]
