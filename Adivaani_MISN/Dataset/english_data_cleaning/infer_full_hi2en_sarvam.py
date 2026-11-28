@@ -47,7 +47,11 @@ OUT_COLS = ["Unique_ID", "English", "Hindi", "Bhili"]
 
 def build_messages(src_text):
     return [
-        {"role": "system", "content": "Translate the text below to English."},
+        {"role": "system", "content": (
+            "Translate the given Hindi text to English. Output ONLY the direct "
+            "translation itself -- a single line, no notes, no explanations, no "
+            "alternate translations, no commentary of any kind."
+        )},
         {"role": "user", "content": str(src_text)},
     ]
 
@@ -117,7 +121,10 @@ def main():
             )
             gen_only = out[:, enc["input_ids"].shape[1]:]
             decoded = tokenizer.batch_decode(gen_only, skip_special_tokens=True)
-            preds = [p.strip() for p in decoded]
+            # Sarvam is chat-tuned and sometimes appends "Note: ..." commentary
+            # or loops restating the translation after a blank line -- keep
+            # only the first paragraph, which is always the actual translation.
+            preds = [p.strip().split("\n\n")[0].strip() for p in decoded]
 
             for i, pred in zip(batch_idx, preds):
                 df.at[i, "English"] = pred
