@@ -20,10 +20,12 @@ losing at most the last <5,000 rows of work.
 
 Run (1 GPU, interactive job):
     python infer_full_hi2en_indictrans2.py
+    python infer_full_hi2en_indictrans2.py --csv_path needs_correction.csv
 """
 
 import os
 import time
+import argparse
 from pathlib import Path
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -35,7 +37,6 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from IndicTransToolkit import IndicProcessor
 
 HERE = Path(__file__).resolve().parent
-CSV_PATH = str(HERE / "eng_ready_infer.csv")
 
 REPO_ROOT = "/home/scai/msr/aiy257590/flash/final-climb-adivaani/RECAP"
 INDICTRANS2_BASE_MODEL = f"{REPO_ROOT}/Models/IndicTrans2-indic-en-1B"
@@ -51,6 +52,11 @@ OUT_COLS = ["Unique_ID", "English", "Hindi", "Bhili"]
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv_path", default=str(HERE / "eng_ready_infer.csv"))
+    args = ap.parse_args()
+    CSV_PATH = args.csv_path
+
     df = pd.read_csv(CSV_PATH, dtype=str, keep_default_na=False, na_values=[])
     print(f"[read] {CSV_PATH} ({len(df)} rows)")
     for col in ("Unique_ID", "Hindi", "Bhili"):
